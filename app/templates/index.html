@@ -17,23 +17,6 @@
                     <ul class="dropdown-menu">
                         <li>
                             <div class="dropdown-item">
-                                <div class="btn-group w-100" role="group" aria-label="Type filter">
-                                    <input type="radio" class="btn-check type-toggle" name="typeFilter" id="typeAll" autocomplete="off" checked>
-                                    <label class="btn btn-outline-primary" for="typeAll">All</label>
-
-                                    <input type="radio" class="btn-check type-toggle" name="typeFilter" id="typeBase" autocomplete="off">
-                                    <label class="btn btn-outline-primary" for="typeBase">Base</label>
-
-                                    <input type="radio" class="btn-check type-toggle" name="typeFilter" id="typeDlc" autocomplete="off">
-                                    <label class="btn btn-outline-primary" for="typeDlc">DLC</label>
-                                </div>
-                            </div>
-                        </li>
-                        <li>
-                            <hr class="dropdown-divider">
-                        </li>
-                        <li>
-                            <div class="dropdown-item">
                                 <div class="btn-group w-100" role="group" aria-label="Ownership filter">
                                     <input type="radio" class="btn-check ownership-toggle" name="ownershipFilter" id="ownershipAll" autocomplete="off" checked>
                                     <label class="btn btn-outline-primary" for="ownershipAll">All</label>
@@ -150,7 +133,7 @@
 
     function fetchGames() {
         return new Promise((resolve, reject) => {
-            $.get(`/api/titles`, function (data) {
+            $.get(`/api/titles/grouped`, function (data) {
                 totalGames = data.total;
                 games = data.games;
                 filteredGames = games;
@@ -162,7 +145,6 @@
     }
 
     function renderGames() {
-        // Set slider to show `cardsize` columns by default
         $('#cardSizeRange').val(cardSize);
 
         if (currentView === 'card') {
@@ -172,29 +154,20 @@
             renderIconView();
             adjustIconSizes();
         }
-
-        // init version tooltips
-        const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]')
-        const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
-
-        // init version popovers
-        const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]')
-        const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl))
     }
 
     function renderCardView() {
-        // Render card view logic...
         const gameGrid = $('#gameGrid');
-        gameGrid.empty(); // Clear existing games
+        gameGrid.empty();
 
-        // Get games for the current page
-        start = (currentPage - 1) * itemsPerPage
-        end = start + itemsPerPage
-        paginatedGames = filteredGames.slice(start, end);
+        const start = (currentPage - 1) * itemsPerPage;
+        const end = start + itemsPerPage;
+        const paginatedGames = filteredGames.slice(start, end);
 
         paginatedGames.forEach(function (game) {
             const gameCol = $('<div class="col game-col"></div>').addClass(`col-${12 / getColumnsForCardSize(cardSize)}`);
 
+            const link = $('<a class="game-card-link"></a>').attr('href', `/title/${game.title_id}`);
             const card = $('<div class="card text-bg-dark game-card"></div>');
 
             const img = $('<img class="card-img"></img>').attr('src', game.bannerUrl);
@@ -202,86 +175,47 @@
 
             const cardOverlay = $('<div class="card-img-overlay game-info"></div>');
 
-            const title = $('<h5 class="card-title game-title"></h5>').text(game.title_id_name || game.name);
+            const title = $('<h5 class="card-title game-title"></h5>').text(game.name);
             cardOverlay.append(title);
 
-            const description = $('<p class="card-text game-description"></p>');
-            if (game.app_type === 'DLC') {
-                const small = $('<small></small>').text(`${game.name} | `);
-                description.append(small);
-            }
-            const small = $('<small></small>').text(game.id);
-            description.append(small);
-            cardOverlay.append(description);
+            const chipRow = $('<div class="chip-row"></div>');
 
-            const tagsContainer = $('<div class="tags-container"></div>');
-
-            const typeBadgeClass = (game.owned === false) ? 'text-bg-warning' : 'text-bg-info';
-            const typeBadge = $(`<span class="badge rounded-pill ${typeBadgeClass} game-tag"></span>`).text(game.app_type);
-            tagsContainer.append(typeBadge);
-
-            if (game.has_latest_version !== undefined) {
-                const versionBadge = $(`<span class="badge rounded-pill game-tag version-tag" title="${game.name} [${game.title_id}] Updates"></span>`)
-                    .addClass(`text-bg-${game.has_latest_version ? 'success' : 'warning'}`)
-                    .html(`<i class="bi ${game.has_latest_version ? 'bi-check-circle-fill' : 'bi-arrow-down-circle'}"></i>`);
-                if (game.version !== undefined && game.version.length && Array.isArray(game.version)) {
-                    const popoverContent = game.version.map(version => 
-                        `${version.release_date}: v${version.version} ${version.owned ? 'Owned' : 'Missing'}`
-                    ).join('\n');
-                    versionBadge.popover({
-                        content: popoverContent,
-                        trigger: 'click',
-                        placement: 'top',
-                    });
-                    versionBadge.css('cursor', 'pointer');
-                } else {
-                    // version tooltip on hover
-                    versionBadge.attr("data-bs-toggle", "tooltip")
-                    versionBadge.attr("data-bs-placement", "top")
-
-                    if (game.version !== undefined && !game.version.length && Array.isArray(game.version)){
-                        versionBadge.attr("data-bs-title", "Version v0")
-                    } else if (game.version !== undefined && game.version.length) {
-                        versionBadge.attr("data-bs-title", "Version v" + game.version)
-                    }
-                }
-                tagsContainer.append(versionBadge);
+            if (!game.has_latest_version && game.updates && game.updates.length > 0) {
+                chipRow.append($('<span class="chip chip-attention"></span>').text('Update available'));
             }
 
-            if (game.has_all_dlcs !== undefined) {
-                const dlcBadge = $('<span class="badge rounded-pill game-tag"></span>').addClass(`text-bg-${game.has_all_dlcs ? 'success' : 'warning'}`).html('<i class="bi bi-box-seam-fill"></i>');
-                tagsContainer.append(dlcBadge);
+            if (game.dlc_total_count > 0 && !game.has_all_dlcs) {
+                chipRow.append($('<span class="chip chip-attention"></span>').text(`${game.dlc_owned_count}/${game.dlc_total_count} DLC`));
             }
 
-            cardOverlay.append(tagsContainer);
+            if (chipRow.children().length > 0) {
+                cardOverlay.append(chipRow);
+            }
             card.append(cardOverlay);
-            gameCol.append(card);
+            link.append(card);
+            gameCol.append(link);
             gameGrid.append(gameCol);
         });
-        // Update pagination
-        updatePaginationControls(filteredGames.length)
 
+        updatePaginationControls(filteredGames.length);
     }
 
     function renderIconView() {
-        // Render icon view logic...
         const gameGrid = $('#gameGrid');
-        gameGrid.empty(); // Clear existing games
-        // Get games for the current page
-        start = (currentPage - 1) * itemsPerPage
-        end = start + itemsPerPage
-        baseGames = filteredGames.filter(game => game.app_type === 'BASE');
-        paginatedGames = baseGames.slice(start, end);
+        gameGrid.empty();
+        const start = (currentPage - 1) * itemsPerPage;
+        const end = start + itemsPerPage;
+        const paginatedGames = filteredGames.slice(start, end);
 
         paginatedGames.forEach(game => {
+            const link = $('<a></a>').attr('href', `/title/${game.title_id}`);
             const icon = $('<img class="game-icon">').attr('src', game.iconUrl);
-            gameGrid.append(icon);
+            link.append(icon);
+            gameGrid.append(link);
         });
 
-        // Adjust icon sizes based on the slider value
         adjustIconSizes(cardSize);
-        // Update pagination
-        updatePaginationControls(baseGames.length)
+        updatePaginationControls(filteredGames.length);
     }
 
     function getColumnsForCardSize(size) {
@@ -359,17 +293,10 @@
 
     function saveFiltersToStorage() {
         const filters = {
-            type: "",
             ownership: "",
             update: "",
             completion: ""
         };
-
-        if ($('#typeBase').is(':checked')) {
-            filters.type = 'BASE';
-        } else if ($('#typeDlc').is(':checked')) {
-            filters.type = 'DLC';
-        }
 
         if ($('#ownershipOwned').is(':checked')) {
             filters.ownership = 'Owned';
@@ -396,9 +323,6 @@
         const savedFilters = localStorage.getItem('activeFilters');
         if (savedFilters) {
             const filters = JSON.parse(savedFilters);
-
-            $('#typeBase').prop('checked', filters.type === 'BASE');
-            $('#typeDlc').prop('checked', filters.type === 'DLC');
 
             $('#ownershipOwned').prop('checked', filters.ownership === 'Owned');
             $('#ownershipMissing').prop('checked', filters.ownership === 'Missing');
@@ -484,19 +408,6 @@
             renderGames(games);
         });
 
-        // Handle type filter toggle buttons
-        $('.type-toggle').change(function () {
-            if ($('#typeBase').is(':checked')) {
-                activeTypeFilter = 'BASE';
-            } else if ($('#typeDlc').is(':checked')) {
-                activeTypeFilter = 'DLC';
-            } else {
-                activeTypeFilter = '';
-            }
-            applyFilters();
-            saveFiltersToStorage();
-        });
-
         // Handle ownership filter toggle buttons
         $('.ownership-toggle').change(function () {
             if ($('#ownershipOwned').is(':checked')) {
@@ -543,34 +454,14 @@
             applyFilters();
         });
 
-        // Close popovers
-        $(document).on('click', function (e) {
-            $('.popover').removeClass('show');
-            $('.popover').remove();
-        });
-
-        // Add click event on the popover to stop propagation
-        $(document).on('click', '.popover', function (e) {
-            e.stopPropagation(); // Prevent the click event from bubbling up
-        });
-    
     });
 
     // Store active filters
-    let activeTypeFilter = "";
     let activeOwnershipFilter = "";
     let activeUpdateFilter = "";
     let activeCompletionFilter = "";
 
     function updateFilter() {
-        // $('#filterDropdownBtn').toggle();
-        if ($('#typeBase').is(":checked")) {
-            activeTypeFilter = 'BASE';
-        } else if ($('#typeDlc').is(":checked")) {
-            activeTypeFilter = 'DLC';
-        } else {
-            activeTypeFilter = '';
-        }
         if ($('#ownershipOwned').is(":checked")) {
             activeOwnershipFilter = 'Owned';
         } else if ($('#ownershipMissing').is(":checked")) {
@@ -615,11 +506,8 @@
         const searchTerm = $('#textFilter').val();
         let filtered = filterGamesBySearchTerm(games, searchTerm);
 
-        if (activeTypeFilter) {
-            filtered = filtered.filter(game => game.app_type === activeTypeFilter);
-        }
         if (activeOwnershipFilter) {
-            filtered = filtered.filter(game => activeOwnershipFilter === 'Owned' ? game.owned === true : game.owned === false);
+            filtered = filtered.filter(game => activeOwnershipFilter === 'Owned' ? game.base_owned === true : game.base_owned === false);
         }
         if (activeUpdateFilter) {
             filtered = filtered.filter(game => activeUpdateFilter === 'Up to date' ? game.has_latest_version === true : game.has_latest_version === false);
@@ -639,10 +527,8 @@
         }
         const searchText = searchTerm.toLowerCase();
         return gameList.filter(game =>
-            game.app_id?.toLowerCase().includes(searchText) ||
             game.title_id?.toLowerCase().includes(searchText) ||
-            game.name?.toLowerCase().includes(searchText) ||
-            game.title_id_name?.toLowerCase().includes(searchText)
+            game.name?.toLowerCase().includes(searchText)
         );
     }
 

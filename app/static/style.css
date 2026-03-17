@@ -123,3 +123,68 @@ p.game-description {
     background: none;
     box-shadow: none;
 }
+
+/* Game card clickable link */
+.game-card-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.game-card {
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.game-card:hover {
+    transform: scale(1.03);
+}
+
+/* Status text colors (detail page) */
+.status-owned {
+    color: #75b798;
+}
+
+.status-missing {
+    color: #ffc107;
+}
+
+/* Status chips on cards */
+.chip-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.chip-attention {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.6;
+    white-space: nowrap;
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+}
+
+/* Detail page */
+#detail-content .card {
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+#detail-content #gameBanner {
+    max-height: 250px;
+    object-fit: cover;
+    width: 100%;
+}
+
+#detail-content .btn-outline-primary i.bi-download {
+    font-size: 0.875rem;
+}
+
+#combinedCard .btn i {
+    margin-right: 2px;
+}

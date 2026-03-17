@@ -182,3 +182,13 @@ def set_scheduler_settings(data):
     with settings_lock:
         with open(CONFIG_FILE, 'w') as yaml_file:
             yaml.dump(settings, yaml_file)
+
+def set_downloads_settings(data):
+    settings = load_settings()
+    if 'prowlarr' in data:
+        settings['downloads']['prowlarr'].update(data['prowlarr'])
+    if 'torrent_client' in data:
+        settings['downloads']['torrent_client'].update(data['torrent_client'])
+    with settings_lock:
+        with open(CONFIG_FILE, 'w') as yaml_file:
+            yaml.dump(settings, yaml_file)

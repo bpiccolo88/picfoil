@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Picfoil</Name>
+  <Repository>picfoil:latest</Repository>
+  <Registry/>
+  <Network>br0.30</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>Picfoil is a Nintendo Switch game library manager and Tinfoil shop server.&#xD;
+&#xD;
+Place your keys.txt file in the config directory (/app/config/keys.txt) for title decryption support.&#xD;
+&#xD;
+Note: This template assumes a locally built image. Set the Repository field to your local image name (e.g. picfoil:latest) after building with: docker build -t picfoil:latest .</Overview>
+  <Category>GameServers: MediaServer:Other</Category>
+  <WebUI>http://[IP]:[PORT:8465]</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="8465" Default="8465" Mode="tcp" Description="Picfoil web interface port" Type="Port" Display="always" Required="true" Mask="false">8465</Config>
+  <Config Name="Games Library" Target="/games" Default="/mnt/user/gaming/Switch_Games" Mode="rw" Description="Path to your Nintendo Switch games library" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/gaming/Switch_Games</Config>
+  <Config Name="Config" Target="/app/config" Default="/mnt/user/appdata/picfoil/config" Mode="rw" Description="Configuration directory (stores ownfoil.db, settings.yaml, keys.txt)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/picfoil/config</Config>
+  <Config Name="Data" Target="/app/data" Default="/mnt/user/appdata/picfoil/data" Mode="rw" Description="Data directory (cache, titledb)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/picfoil/data</Config>
+  <Config Name="Combined Games Output" Target="/combined" Default="" Mode="rw" Description="Output directory for combined XCI files (optional, only needed if XCI combining is enabled in settings)" Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Downloads" Target="/downloads" Default="" Mode="rw" Description="Torrent client download directory (optional, only needed if Prowlarr/torrent integration is enabled)" Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions (99 = nobody on Unraid)" Type="Variable" Display="always" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions (100 = users on Unraid)" Type="Variable" Display="always" Required="false" Mask="false">100</Config>
+  <Config Name="Admin Username" Target="USER_ADMIN_NAME" Default="" Mode="" Description="Admin user name (optional, created/updated at startup)" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Admin Password" Target="USER_ADMIN_PASSWORD" Default="" Mode="" Description="Admin user password (optional)" Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Guest Username" Target="USER_GUEST_NAME" Default="" Mode="" Description="Guest user name (optional, created/updated at startup)" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Guest Password" Target="USER_GUEST_PASSWORD" Default="" Mode="" Description="Guest user password (optional)" Type="Variable" Display="always" Required="false" Mask="true"/>
+</Container>

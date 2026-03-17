@@ -103,18 +103,32 @@ In the `Settings` page under the `Shop` section is where you customize your Shop
 # Roadmap
 Planned feature, in no particular order.
  - Library browser:
-    - [ ] Add "details" view for every content, to display versions etc
+    - [x] Add "details" view for every content, to display versions etc
+    - [x] Title-centric library grid (one card per game, collapsing base/update/DLC)
+    - [x] Clickable cards linking to detail page with full update history and DLC list
+    - [x] Display required firmware version on detail page
+    - [x] Public shop allows unauthenticated access to browse library
  - Library management:
-    - [ ] Rename and organize library after content identification
-    - [ ] Delete older updates
+    - [x] Rename and organize library after content identification
+    - [x] Delete older updates
     - [ ] Automatic nsp/xci -> nsz conversion
+ - Combined XCI:
+    - [x] Build multi-content XCI files (base + update + DLC) via ACORN
+    - [x] Per-title combine from detail page with progress polling
+    - [x] Combine all titles at once from settings
+    - [x] Auto-combine on library change (optional setting)
+    - [x] Change detection to skip unchanged titles on re-combine
+    - [x] Separate output directory (/combined volume mount)
+ - File downloads:
+    - [x] Download individual files from detail page
+    - [x] Download combined XCI from detail page
  - Shop customization:
-    - [ ] Encrypt shop
+    - [x] Encrypt shop
  - Support emulator Roms
     - [ ] Scrape box arts
     - [ ] Automatically create NSP forwarders
  - Saves manager:
-    - [ ] Automatically discover Swicth device based on Tinfoil connection
+    - [ ] Automatically discover Switch device based on Tinfoil connection
     - [ ] Only backup and serve saves based on the user/Switch
  - External services:
     - [ ] Integrate torrent indexer Jackett to download updates automatically

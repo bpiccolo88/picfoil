@@ -1,0 +1,24 @@
+version: "3"
+
+services:
+  picfoil-dev:
+    container_name: picfoil-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PUID=99
+      - PGID=100
+      - USER_ADMIN_NAME=admin
+      - USER_ADMIN_PASSWORD=picfoil123
+    volumes:
+      - /mnt/user/gaming/Dev_Switch_Games:/games
+      - /mnt/cache/appdata/dev-picfoil/config:/app/config
+      - /mnt/cache/appdata/dev-picfoil/data:/app/data
+    networks:
+      br0.30: {}
+    restart: unless-stopped
+
+networks:
+  br0.30:
+    external: true

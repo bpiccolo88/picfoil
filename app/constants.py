@@ -8,6 +8,8 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, 'settings.yaml')
 KEYS_FILE = os.path.join(CONFIG_DIR, 'keys.txt')
 CACHE_DIR = os.path.join(DATA_DIR, 'cache')
 LIBRARY_CACHE_FILE = os.path.join(CACHE_DIR, 'library.json')
+COMBINE_STATE_FILE = os.path.join(DATA_DIR, 'combine_state.json')
+DOWNLOAD_STATE_FILE = os.path.join(DATA_DIR, 'download_state.json')
 ALEMBIC_DIR = os.path.join(APP_DIR, 'migrations')
 ALEMBIC_CONF = os.path.join(ALEMBIC_DIR, 'alembic.ini')
 TITLEDB_DIR = os.path.join(DATA_DIR, 'titledb')
@@ -28,6 +30,10 @@ DEFAULT_SETTINGS = {
         "management": {
             "compress_files": False,
             "delete_older_updates": False,
+            "combine_xci": {
+                "enabled": False,
+                "output_path": "/combined"
+            },
             "organizer": {
                 "enabled": False,
                 "remove_empty_folders": False,
@@ -56,6 +62,25 @@ DEFAULT_SETTINGS = {
     },
     "scheduler": {
         "scan_interval": "12h",
+    },
+    "downloads": {
+        "prowlarr": {
+            "enabled": False,
+            "url": "",
+            "api_key": "",
+            "indexer_ids": [],
+            "categories": [1000, 4070]
+        },
+        "torrent_client": {
+            "type": "transmission",
+            "url": "",
+            "username": "",
+            "password": "",
+            "save_path": "",
+            "category": "picfoil",
+            "auto_search": False,
+            "auto_search_interval": "24h"
+        }
     }
 }
 

@@ -168,7 +168,10 @@
                         <label class="form-label">Add a new directory:</label>
                         <div class="row g-3">
                             <div class="col-6">
-                                <input type="text" class="form-control" id="libraryPathInput" placeholder="Path">
+                                <div class="position-relative">
+                                    <input type="text" class="form-control path-autocomplete" id="libraryPathInput" placeholder="Path" autocomplete="off">
+                                    <div class="path-suggestions list-group" style="display:none;position:absolute;z-index:1050;width:100%;max-height:200px;overflow-y:auto;"></div>
+                                </div>
                             </div>
                             <div class="col-auto">
                                 <button type="button" id="submitNewLibraryPathBtn" class="btn btn-primary mb-3"
@@ -276,6 +279,29 @@
                     </div>
                 </div>
 
+                <hr class="hr-settings">
+                <h4 class="py-2">Combined XCI</h4>
+                <p>Combine base game, update, and DLC into single XCI files for emulation.</p>
+                <div class="row">
+                    <div class="col-7">
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="combineEnabledCheck">
+                            <label class="form-check-label" for="combineEnabledCheck">Automatically combine all games when library changes</label>
+                            <div class="form-text">When enabled, combined XCI files will be rebuilt automatically whenever the library is updated.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="combineOutputPathInput" class="form-label">Output path:</label>
+                            <input type="text" class="form-control form-control-code" id="combineOutputPathInput">
+                            <div class="form-text">Directory where combined XCI files will be saved. Must be mounted in the container.</div>
+                        </div>
+                        <button type="button" class="btn btn-outline-primary mb-3" onclick="combineAllNow()">
+                            <span id="combineAllSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            Combine All Now
+                        </button>
+                        <span id="combineAllStatus" class="ms-2"></span>
+                    </div>
+                </div>
+
                 <div>
                     <button type="button" id="submitLibraryManagementSettingsBtn" class="btn btn-primary"
                         onClick='submitLibraryManagementSettings()'>Submit</button>
@@ -314,10 +340,16 @@
                     </div>
 
                     <!-- Missing console keys -->
-                    <div class="col-6">
+                    <div class="col-3">
                         <label for="keysAlert" class="form-label">Master key revisions:</label>
                         <div id="keysAlert" class="alert alert-secondary py-2 mb-0">
                             <p id="keysMissingLabel" class="mb-0"></p>
+                        </div>
+                    </div>
+                    <div class="col-3">
+                        <label class="form-label">Firmware support:</label>
+                        <div id="firmwareSupport" class="alert alert-secondary py-2 mb-0">
+                            <p id="firmwareSupportLabel" class="mb-0">-</p>
                         </div>
                     </div>
                 </div>
@@ -387,6 +419,102 @@
                 <div class="mb-3">
                     <button type="button" id="submitSchedulerSettingsBtn" class="btn btn-primary"
                         onClick='submitSchedulerSettings()'>Submit</button>
+                </div>
+
+                <hr class="hr-settings">
+                <h2 class="pb-2">Downloads</h2>
+                <p>Configure Prowlarr and Transmission to search and download missing content.</p>
+
+                <h4 class="py-2">Prowlarr</h4>
+                <div class="row">
+                    <div class="col-7">
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="prowlarrEnabledCheck">
+                            <label class="form-check-label" for="prowlarrEnabledCheck">Enable Prowlarr integration</label>
+                        </div>
+                        <div class="mb-3">
+                            <label for="prowlarrUrlInput" class="form-label">Prowlarr URL:</label>
+                            <input type="text" class="form-control" id="prowlarrUrlInput" placeholder="http://192.168.1.100:9696">
+                        </div>
+                        <div class="mb-3">
+                            <label for="prowlarrApiKeyInput" class="form-label">API Key:</label>
+                            <input type="password" class="form-control" id="prowlarrApiKeyInput" placeholder="Your Prowlarr API key">
+                        </div>
+                        <div class="mb-3">
+                            <label for="prowlarrIndexersSelect" class="form-label">Indexers:</label>
+                            <select multiple class="form-select" id="prowlarrIndexersSelect" size="4">
+                            </select>
+                            <div class="form-text">Select specific indexers to search, or leave empty to search all. Hold Ctrl/Cmd to select multiple.</div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="loadIndexers()">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh Indexers
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-outline-info mb-3" onclick="testProwlarr()">
+                            <span id="prowlarrTestSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            Test Connection
+                        </button>
+                        <span id="prowlarrTestResult" class="ms-2"></span>
+                    </div>
+                </div>
+
+                <h4 class="py-2">Transmission</h4>
+                <div class="row">
+                    <div class="col-7">
+                        <div class="mb-3">
+                            <label for="torrentUrlInput" class="form-label">Transmission URL:</label>
+                            <input type="text" class="form-control" id="torrentUrlInput" placeholder="http://192.168.1.100:9091">
+                        </div>
+                        <div class="mb-3">
+                            <label for="torrentUsernameInput" class="form-label">Username:</label>
+                            <input type="text" class="form-control" id="torrentUsernameInput" placeholder="(optional)">
+                        </div>
+                        <div class="mb-3">
+                            <label for="torrentPasswordInput" class="form-label">Password:</label>
+                            <input type="password" class="form-control" id="torrentPasswordInput" placeholder="(optional)">
+                        </div>
+                        <div class="mb-3">
+                            <label for="torrentSavePathInput" class="form-label">Save path:</label>
+                            <div class="position-relative">
+                                <input type="text" class="form-control path-autocomplete" id="torrentSavePathInput" placeholder="/games/downloads" autocomplete="off">
+                                <div class="path-suggestions list-group" style="display:none;position:absolute;z-index:1050;width:100%;max-height:200px;overflow-y:auto;"></div>
+                            </div>
+                            <div class="form-text">Where Transmission saves completed files. Should map to a Picfoil library directory for auto-scanning.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="torrentCategoryInput" class="form-label">Label:</label>
+                            <input type="text" class="form-control" id="torrentCategoryInput" placeholder="picfoil">
+                            <div class="form-text">Transmission label to tag Picfoil downloads.</div>
+                        </div>
+                        <button type="button" class="btn btn-outline-info mb-3" onclick="testTorrent()">
+                            <span id="torrentTestSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            Test Connection
+                        </button>
+                        <span id="torrentTestResult" class="ms-2"></span>
+                    </div>
+                </div>
+
+                <h4 class="py-2">Automation</h4>
+                <div class="row">
+                    <div class="col-7">
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="autoSearchCheck">
+                            <label class="form-check-label" for="autoSearchCheck">Automatically search for missing content</label>
+                        </div>
+                        <div class="mb-3">
+                            <label for="autoSearchIntervalSelect" class="form-label">Search interval:</label>
+                            <select class="form-select" id="autoSearchIntervalSelect">
+                                <option value="1h">Every hour</option>
+                                <option value="6h">Every 6 hours</option>
+                                <option value="12h">Every 12 hours</option>
+                                <option value="24h">Every 24 hours</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <button type="button" id="submitDownloadsSettingsBtn" class="btn btn-primary"
+                        onClick='submitDownloadsSettings()'>Submit</button>
                 </div>
 
             </div>
@@ -522,7 +650,45 @@
 
     }
 
+    // Master key revision to firmware version mapping
+    const KEY_REV_TO_FIRMWARE = {
+        0: '1.0.0', 1: '2.0.0', 2: '3.0.0', 3: '3.0.1', 4: '4.0.0',
+        5: '5.0.0', 6: '6.0.0', 7: '6.2.0', 8: '7.0.0', 9: '8.1.0',
+        10: '9.0.0', 11: '9.1.0', 12: '12.1.0', 13: '13.0.0',
+        14: '14.0.0', 15: '15.0.0', 16: '16.0.0', 17: '17.0.0',
+        18: '18.0.0', 19: '19.0.0'
+    };
+
+    function getMaxFirmwareFromKeys(titlesSettings) {
+        if (!titlesSettings['valid_keys']) return null;
+        var missing = titlesSettings['missing_keys'] || [];
+        // Find highest revision that is NOT missing
+        var maxRev = -1;
+        for (var i = 0; i <= 19; i++) {
+            var keyName = 'master_key_' + ('0' + i.toString(16)).slice(-2);
+            if (missing.indexOf(keyName) === -1) {
+                maxRev = i;
+            }
+        }
+        if (maxRev >= 0 && KEY_REV_TO_FIRMWARE[maxRev]) {
+            return KEY_REV_TO_FIRMWARE[maxRev];
+        }
+        return null;
+    }
+
     function updateKeysElements(titlesSettings) {
+        // Firmware support indicator
+        var maxFw = getMaxFirmwareFromKeys(titlesSettings);
+        if (maxFw) {
+            $('#firmwareSupportLabel').text('Keys support up to firmware ' + maxFw);
+            $('#firmwareSupport').css("border-color", "var(--bs-form-valid-border-color)");
+        } else if (titlesSettings['valid_keys'] === null) {
+            $('#firmwareSupportLabel').text('No keys loaded');
+            $('#firmwareSupport').css("border-color", "var(--bs-danger-border-subtle)");
+        } else {
+            $('#firmwareSupportLabel').text('Could not determine');
+        }
+
         // Keys alert
         if (titlesSettings['valid_keys']) {
             $('#consoleKeysFeedback').text("Keys are valid!");
@@ -988,6 +1154,10 @@
         data = {
             compress_files: getCheckboxStatus("compressFilesCheck"),
             delete_older_updates: getCheckboxStatus("deleteOlderUpdatesCheck"),
+            combine_xci: {
+                enabled: getCheckboxStatus("combineEnabledCheck"),
+                output_path: getInputVal("combineOutputPathInput") || "/combined"
+            },
             organizer: {
                 enabled: getCheckboxStatus("organizerEnabledCheck"),
                 remove_empty_folders: getCheckboxStatus("removeEmptyFoldersCheck"),
@@ -1012,6 +1182,20 @@
                 }
                 $('#submitLibraryManagementSettingsBtn').prop('disabled', false);
             }
+        });
+    }
+
+    function combineAllNow() {
+        $('#combineAllSpinner').removeClass('d-none');
+        $('#combineAllStatus').text('Started...');
+        $.post('/api/combine/all', function() {
+            $('#combineAllStatus').text('Combining in background. Check logs for progress.');
+            setTimeout(function() {
+                $('#combineAllSpinner').addClass('d-none');
+            }, 2000);
+        }).fail(function() {
+            $('#combineAllSpinner').addClass('d-none');
+            $('#combineAllStatus').text('Failed to start.');
         });
     }
 
@@ -1049,6 +1233,103 @@
                     $("#scanIntervalInput").addClass('is-valid');
                 }
                 $('#submitSchedulerSettingsBtn').prop('disabled', false);
+            }
+        });
+    }
+
+    function testProwlarr() {
+        $('#prowlarrTestSpinner').removeClass('d-none');
+        $('#prowlarrTestResult').text('');
+        $.ajax({
+            url: '/api/downloads/test/prowlarr',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                url: getInputVal('prowlarrUrlInput'),
+                api_key: getInputVal('prowlarrApiKeyInput')
+            }),
+            success: function(result) {
+                $('#prowlarrTestSpinner').addClass('d-none');
+                const cls = result.success ? 'text-success' : 'text-danger';
+                $('#prowlarrTestResult').attr('class', 'ms-2 ' + cls).text(result.message);
+                if (result.success) loadIndexers();
+            },
+            error: function() {
+                $('#prowlarrTestSpinner').addClass('d-none');
+                $('#prowlarrTestResult').attr('class', 'ms-2 text-danger').text('Request failed');
+            }
+        });
+    }
+
+    function testTorrent() {
+        $('#torrentTestSpinner').removeClass('d-none');
+        $('#torrentTestResult').text('');
+        $.ajax({
+            url: '/api/downloads/test/torrent',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                url: getInputVal('torrentUrlInput'),
+                username: getInputVal('torrentUsernameInput'),
+                password: getInputVal('torrentPasswordInput')
+            }),
+            success: function(result) {
+                $('#torrentTestSpinner').addClass('d-none');
+                const cls = result.success ? 'text-success' : 'text-danger';
+                $('#torrentTestResult').attr('class', 'ms-2 ' + cls).text(result.message);
+            },
+            error: function() {
+                $('#torrentTestSpinner').addClass('d-none');
+                $('#torrentTestResult').attr('class', 'ms-2 text-danger').text('Request failed');
+            }
+        });
+    }
+
+    function loadIndexers() {
+        const url = getInputVal('prowlarrUrlInput');
+        const apiKey = getInputVal('prowlarrApiKeyInput');
+        $.get('/api/downloads/indexers', { url: url, api_key: apiKey }, function(indexers) {
+            const sel = $('#prowlarrIndexersSelect');
+            sel.empty();
+            const savedIds = (window._downloadsSettings || {}).prowlarr?.indexer_ids || [];
+            indexers.forEach(function(idx) {
+                const selected = savedIds.includes(idx.id) ? ' selected' : '';
+                sel.append('<option value="' + idx.id + '"' + selected + '>' + idx.name + '</option>');
+            });
+        });
+    }
+
+    function submitDownloadsSettings() {
+        $('#submitDownloadsSettingsBtn').prop('disabled', true);
+        const selectedIndexers = $('#prowlarrIndexersSelect').val() || [];
+        const data = {
+            prowlarr: {
+                enabled: getCheckboxStatus('prowlarrEnabledCheck'),
+                url: getInputVal('prowlarrUrlInput'),
+                api_key: getInputVal('prowlarrApiKeyInput'),
+                indexer_ids: selectedIndexers.map(Number)
+            },
+            torrent_client: {
+                url: getInputVal('torrentUrlInput'),
+                username: getInputVal('torrentUsernameInput'),
+                password: getInputVal('torrentPasswordInput'),
+                save_path: getInputVal('torrentSavePathInput'),
+                category: getInputVal('torrentCategoryInput') || 'picfoil',
+                auto_search: getCheckboxStatus('autoSearchCheck'),
+                auto_search_interval: getInputVal('autoSearchIntervalSelect')
+            }
+        };
+
+        $.ajax({
+            url: '/api/settings/downloads',
+            type: 'POST',
+            data: JSON.stringify(data),
+            contentType: 'application/json',
+            success: function(result) {
+                if (result.success) {
+                    console.log('Downloads settings saved.');
+                }
+                $('#submitDownloadsSettingsBtn').prop('disabled', false);
             }
         });
     }
@@ -1109,6 +1390,12 @@
             setInputVal("dlcTemplateInput", librarySettings['management']['organizer']['templates']['dlc']);
             setInputVal("multiTemplateInput", librarySettings['management']['organizer']['templates']['multi']);
 
+            // Combined XCI settings
+            if (librarySettings['management']['combine_xci']) {
+                $("#combineEnabledCheck").prop("checked", librarySettings['management']['combine_xci']['enabled']);
+                setInputVal("combineOutputPathInput", librarySettings['management']['combine_xci']['output_path']);
+            }
+
             // Titles settings
             titlesSettings = result['titles'];
             updateKeysElements(titlesSettings);
@@ -1135,6 +1422,29 @@
             } else if (!shopSettings['hauth']) {
                 $("#missingShopHauthAlert").css('display', '');
             }
+
+            // Downloads settings
+            const dlSettings = result['downloads'] || {};
+            window._downloadsSettings = dlSettings;
+            const prowlarrSettings = dlSettings['prowlarr'] || {};
+            const tcSettings = dlSettings['torrent_client'] || {};
+
+            $("#prowlarrEnabledCheck").prop("checked", prowlarrSettings['enabled']);
+            setInputVal("prowlarrUrlInput", prowlarrSettings['url']);
+            setInputVal("prowlarrApiKeyInput", prowlarrSettings['api_key']);
+
+            setInputVal("torrentUrlInput", tcSettings['url']);
+            setInputVal("torrentUsernameInput", tcSettings['username']);
+            setInputVal("torrentPasswordInput", tcSettings['password']);
+            setInputVal("torrentSavePathInput", tcSettings['save_path']);
+            setInputVal("torrentCategoryInput", tcSettings['category'] || 'picfoil');
+            $("#autoSearchCheck").prop("checked", tcSettings['auto_search']);
+            setInputVal("autoSearchIntervalSelect", tcSettings['auto_search_interval'] || '24h');
+
+            // Load indexers if Prowlarr is configured
+            if (prowlarrSettings['url'] && prowlarrSettings['api_key']) {
+                loadIndexers();
+            }
         });
 
     });
@@ -1143,6 +1453,91 @@
     $('#checkboxNewUserShopAccess').prop('checked', true).attr("disabled", true);
     $('#checkboxNewUserBackupAccess').prop('checked', true).attr("disabled", true);
     {% endif %}
+
+    // --- Path autocomplete for directory inputs ---
+    (function() {
+        let debounceTimer = null;
+
+        function fetchSuggestions(input) {
+            const $input = $(input);
+            const $dropdown = $input.siblings('.path-suggestions');
+            const prefix = $input.val();
+
+            if (!prefix || !prefix.startsWith('/')) {
+                $dropdown.hide().empty();
+                return;
+            }
+
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function() {
+                $.get('/api/browse-directories', { prefix: prefix }, function(data) {
+                    $dropdown.empty();
+                    if (!data.directories || data.directories.length === 0) {
+                        $dropdown.hide();
+                        return;
+                    }
+                    data.directories.forEach(function(dir) {
+                        $dropdown.append(
+                            $('<button type="button" class="list-group-item list-group-item-action py-1 px-2"></button>')
+                                .text(dir)
+                                .on('mousedown', function(e) {
+                                    e.preventDefault();
+                                    $input.val(dir).trigger('input');
+                                    $input.focus();
+                                })
+                        );
+                    });
+                    $dropdown.show();
+                });
+            }, 150);
+        }
+
+        $(document).on('input', '.path-autocomplete', function() {
+            fetchSuggestions(this);
+        });
+
+        $(document).on('focus', '.path-autocomplete', function() {
+            if ($(this).val()) fetchSuggestions(this);
+        });
+
+        $(document).on('blur', '.path-autocomplete', function() {
+            const $dropdown = $(this).siblings('.path-suggestions');
+            setTimeout(function() { $dropdown.hide(); }, 200);
+        });
+
+        $(document).on('keydown', '.path-autocomplete', function(e) {
+            const $dropdown = $(this).siblings('.path-suggestions');
+            const $items = $dropdown.find('.list-group-item');
+            const $active = $dropdown.find('.active');
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if ($active.length && $active.next('.list-group-item').length) {
+                    $active.removeClass('active').next('.list-group-item').addClass('active');
+                } else {
+                    $items.removeClass('active').first().addClass('active');
+                }
+                const active = $dropdown.find('.active')[0];
+                if (active) active.scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if ($active.length && $active.prev('.list-group-item').length) {
+                    $active.removeClass('active').prev('.list-group-item').addClass('active');
+                } else {
+                    $items.removeClass('active').last().addClass('active');
+                }
+                const active = $dropdown.find('.active')[0];
+                if (active) active.scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Tab' || e.key === 'Enter') {
+                if ($dropdown.is(':visible') && $active.length) {
+                    e.preventDefault();
+                    $(this).val($active.text()).trigger('input');
+                }
+            } else if (e.key === 'Escape') {
+                $dropdown.hide();
+            }
+        });
+    })();
 </script>
 
 {% endblock %}

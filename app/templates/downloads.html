@@ -1,0 +1,744 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include 'nav.html' %}
+<style>
+    /* Prevent iOS auto-zoom on form inputs */
+    @media (max-width: 767.98px) {
+        #suggestedSearch, #genreFilter, #publisherFilter, #searchQuery {
+            font-size: 16px !important;
+        }
+        .card-img-top, .card-img-top-placeholder {
+            height: 120px !important;
+        }
+    }
+</style>
+<div class="container mt-4">
+    <h2>Downloads</h2>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0">Missing Content</h5>
+            <div class="btn-group btn-group-sm" id="missingFilters">
+                <button class="btn btn-outline-secondary active" data-filter="all">All</button>
+                <button class="btn btn-outline-secondary" data-filter="updates">Missing Updates</button>
+                <button class="btn btn-outline-secondary" data-filter="dlc">Missing DLC</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive" id="missingContent">
+                <p class="text-muted mb-0">Loading library...</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4" id="suggestedCard">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">Suggested Content</h5>
+                <span class="text-muted small" id="suggestedCount"></span>
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <div class="position-relative flex-grow-1" style="min-width:150px;max-width:300px;">
+                    <input type="text" class="form-control form-control-sm" id="suggestedSearch" placeholder="Search by name..." autocomplete="off">
+                    <button type="button" class="btn btn-sm btn-link position-absolute top-50 end-0 translate-middle-y text-muted p-0 pe-2" id="clearSuggestedSearch" style="display:none;" title="Clear search">&times;</button>
+                </div>
+                <select class="form-select form-select-sm" id="genreFilter" style="width:auto;min-width:120px;">
+                    <option value="">All Genres</option>
+                </select>
+                <select class="form-select form-select-sm" id="publisherFilter" style="width:auto;min-width:120px;">
+                    <option value="">All Publishers</option>
+                </select>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary active" id="sortNewBtn" data-sort="new">New Releases</button>
+                    <button class="btn btn-outline-secondary" id="sortAzBtn" data-sort="az">A-Z</button>
+                    <button class="btn btn-outline-secondary" id="sortUpcomingBtn" data-sort="upcoming">Upcoming</button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="suggestedContent">
+                <p class="text-muted mb-0">Loading suggestions...</p>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-3 d-none" id="suggestedPagination">
+                <button class="btn btn-sm btn-outline-secondary" id="prevPageBtn" disabled>&laquo; Previous</button>
+                <span class="text-muted small" id="pageIndicator"></span>
+                <button class="btn btn-sm btn-outline-secondary" id="nextPageBtn">Next &raquo;</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4" id="searchCard">
+        <div class="card-header">
+            <h5 class="mb-0">Search</h5>
+        </div>
+        <div class="card-body">
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" id="searchQuery" placeholder="Search for Switch content...">
+                <button class="btn btn-primary" onclick="doSearch()">
+                    <i class="bi bi-search"></i> Search
+                </button>
+            </div>
+            <div class="form-check mb-2" id="switchFilterToggle" style="display:none;">
+                <input class="form-check-input" type="checkbox" id="switchOnlyFilter">
+                <label class="form-check-label" for="switchOnlyFilter">Show only Switch-compatible results</label>
+            </div>
+            <div class="table-responsive" id="searchResults"></div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Active Downloads</h5>
+            <button class="btn btn-sm btn-outline-secondary" onclick="refreshDownloads()">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive" id="activeDownloads">
+                <p class="text-muted mb-0">Loading...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Image lightbox overlay -->
+<div id="imageLightbox" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;cursor:pointer;justify-content:center;align-items:center;" onclick="closeLightbox()">
+    <img id="lightboxImg" src="" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:8px;" onclick="event.stopPropagation()">
+</div>
+
+<script>
+    let missingGames = [];
+    let currentFilter = 'all';
+    let currentSearchTitleId = '';
+    let allSuggestions = [];
+    let filteredSuggestions = [];
+    let suggestedPage = 0;
+    let suggestedSort = 'new';
+    const ITEMS_PER_PAGE = 12;
+    let ownedTitleIds = new Set();
+
+    const NON_SWITCH_PATTERN = /\b(PS4|PS5|PS3|PSP|PSVita|Xbox|XB1|XSX|CUSA\d+|PCSE\d+|BLUS\d+|BLES\d+)\b/i;
+    const PKG_PATTERN = /\.pkg\b/i;
+
+    function detectPlatformWarning(title) {
+        const match = title.match(NON_SWITCH_PATTERN);
+        if (match) return match[0].toUpperCase();
+        if (PKG_PATTERN.test(title)) return 'PKG';
+        return null;
+    }
+
+    // Initialize switch-only filter from localStorage
+    (function() {
+        const saved = localStorage.getItem('picfoil_switch_only_filter');
+        // Default to checked if no saved preference
+        const checked = saved === null ? true : saved === 'true';
+        $(function() { $('#switchOnlyFilter').prop('checked', checked); });
+    })();
+
+    $(document).on('change', '#switchOnlyFilter', function() {
+        localStorage.setItem('picfoil_switch_only_filter', $(this).is(':checked'));
+        // Re-render last search results if available
+        if (lastSearchData) renderSearchResults(lastSearchData, lastActiveDownloads);
+    });
+
+    function formatSize(bytes) {
+        if (!bytes) return 'Unknown';
+        const gb = bytes / (1024 * 1024 * 1024);
+        if (gb >= 1) return gb.toFixed(2) + ' GB';
+        const mb = bytes / (1024 * 1024);
+        return mb.toFixed(1) + ' MB';
+    }
+
+    function formatEta(seconds) {
+        if (seconds < 0) return '--';
+        if (seconds < 60) return seconds + 's';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+        return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+    }
+
+    function formatSpeed(bytesPerSec) {
+        if (!bytesPerSec) return '--';
+        const mb = bytesPerSec / (1024 * 1024);
+        if (mb >= 1) return mb.toFixed(1) + ' MB/s';
+        const kb = bytesPerSec / 1024;
+        return kb.toFixed(0) + ' KB/s';
+    }
+
+    // --- Missing Content ---
+
+    function loadMissingContent() {
+        $.get('/api/titles/grouped', function(data) {
+            const allGames = data.games || [];
+            // Track all owned title IDs for "already owned" banner
+            ownedTitleIds = new Set(allGames.filter(g => g.has_base).map(g => g.title_id.toUpperCase()));
+            missingGames = allGames.filter(function(g) {
+                return !g.has_latest_version || !g.has_all_dlcs;
+            }).sort(function(a, b) {
+                return (a.name || '').localeCompare(b.name || '');
+            });
+            renderMissingContent();
+        }).fail(function() {
+            $('#missingContent').html('<p class="text-danger mb-0">Failed to load library.</p>');
+        });
+    }
+
+    function renderMissingContent() {
+        let filtered = missingGames;
+        if (currentFilter === 'updates') {
+            filtered = missingGames.filter(g => !g.has_latest_version);
+        } else if (currentFilter === 'dlc') {
+            filtered = missingGames.filter(g => !g.has_all_dlcs);
+        }
+
+        if (filtered.length === 0) {
+            $('#missingContent').html('<p class="text-muted mb-0">No missing content found.</p>');
+            return;
+        }
+
+        let html = '<table class="table table-sm table-hover mb-0"><thead><tr>' +
+            '<th>Game</th><th>Updates</th><th>DLC</th><th></th>' +
+            '</tr></thead><tbody>';
+
+        filtered.forEach(function(g) {
+            const name = $('<span>').text(g.name).html();
+
+            // Update status
+            let updateStatus;
+            if (g.has_latest_version) {
+                updateStatus = '<span class="badge bg-success">Up to Date</span>';
+            } else {
+                const ownedUpdates = (g.updates || []).filter(u => u.owned).length;
+                const totalUpdates = (g.updates || []).length;
+                const dvSuffix = g.owned_display_version ? ' (v' + g.owned_display_version + ')' : '';
+                updateStatus = '<span class="badge bg-warning">' + g.update_summary + dvSuffix + ' / ' + g.latest_update + '</span>';
+            }
+
+            // DLC status
+            let dlcStatus;
+            if (g.dlc_total_count === 0) {
+                dlcStatus = '<span class="text-muted">None</span>';
+            } else if (g.has_all_dlcs) {
+                dlcStatus = '<span class="badge bg-success">' + g.dlc_owned_count + '/' + g.dlc_total_count + '</span>';
+            } else {
+                dlcStatus = '<span class="badge bg-warning">' + g.dlc_owned_count + '/' + g.dlc_total_count + '</span>';
+            }
+
+            const escapedName = $('<span>').text(g.name).html().replace(/'/g, "\\'");
+
+            html += '<tr>' +
+                '<td><a href="/title/' + g.title_id + '" class="text-decoration-none">' + name + '</a></td>' +
+                '<td>' + updateStatus + '</td>' +
+                '<td>' + dlcStatus + '</td>' +
+                '<td><button class="btn btn-sm btn-outline-info" onclick="searchForGame(\'' + escapedName + '\', \'' + g.title_id + '\')">' +
+                    '<i class="bi bi-search"></i> Search</button></td>' +
+                '</tr>';
+        });
+
+        html += '</tbody></table>';
+        $('#missingContent').html(html);
+    }
+
+    $('#missingFilters .btn').on('click', function() {
+        $('#missingFilters .btn').removeClass('active');
+        $(this).addClass('active');
+        currentFilter = $(this).data('filter');
+        renderMissingContent();
+    });
+
+    // --- Suggested Content ---
+
+    function loadSuggestedContent() {
+        $.get('/api/titles/suggested', function(data) {
+            allSuggestions = (data && data.suggestions) || [];
+            populateFilters();
+            applyFiltersAndRender();
+        }).fail(function() {
+            $('#suggestedContent').html('<p class="text-muted mb-0">Could not load suggestions.</p>');
+        });
+    }
+
+    function catStr(v) { return (typeof v === 'string') ? v : Array.isArray(v) ? v.join(', ') : (v != null ? String(v) : ''); }
+
+    function populateFilters() {
+        // Collect unique genres and publishers
+        const genres = {};
+        const publishers = {};
+        allSuggestions.forEach(function(item) {
+            const cat = catStr(item.category);
+            if (cat) {
+                cat.split(',').forEach(function(c) {
+                    c = c.trim();
+                    if (c && /[a-zA-Z]/.test(c)) genres[c] = (genres[c] || 0) + 1;
+                });
+            }
+            if (item.publisher) {
+                publishers[item.publisher] = (publishers[item.publisher] || 0) + 1;
+            }
+        });
+
+        // Sort by count desc, take top entries
+        const topGenres = Object.entries(genres).sort((a, b) => b[1] - a[1]).slice(0, 20);
+        const topPubs = Object.entries(publishers).sort((a, b) => b[1] - a[1]).slice(0, 30);
+
+        const $genre = $('#genreFilter');
+        $genre.find('option:not(:first)').remove();
+        topGenres.forEach(function(g) {
+            $genre.append($('<option>').val(g[0]).text(g[0] + ' (' + g[1] + ')'));
+        });
+
+        const $pub = $('#publisherFilter');
+        $pub.find('option:not(:first)').remove();
+        topPubs.forEach(function(p) {
+            $pub.append($('<option>').val(p[0]).text(p[0] + ' (' + p[1] + ')'));
+        });
+    }
+
+    function applyFiltersAndRender() {
+        const genre = $('#genreFilter').val();
+        const publisher = $('#publisherFilter').val();
+        const searchTerm = ($('#suggestedSearch').val() || '').trim().toLowerCase();
+
+        filteredSuggestions = allSuggestions.filter(function(item) {
+            if (searchTerm && item.name.toLowerCase().indexOf(searchTerm) === -1) return false;
+            if (genre && (!item.category || catStr(item.category).indexOf(genre) === -1)) return false;
+            if (publisher && item.publisher !== publisher) return false;
+            // Hide unreleased games unless "upcoming" tab is selected
+            if (suggestedSort !== 'upcoming' && item.is_unreleased) return false;
+            // In "upcoming" tab, only show unreleased games
+            if (suggestedSort === 'upcoming' && !item.is_unreleased) return false;
+            return true;
+        });
+
+        // Sort
+        if (suggestedSort === 'az') {
+            filteredSuggestions.sort(function(a, b) { return a.name.toLowerCase().localeCompare(b.name.toLowerCase()); });
+        }
+        // 'new' sort: already sorted new-first from server
+        // 'upcoming' sort: already sorted by date ascending from server
+
+        suggestedPage = 0;
+        renderSuggestedContent();
+    }
+
+    function renderSuggestedContent() {
+        const total = filteredSuggestions.length;
+        const totalPages = Math.max(1, Math.ceil(total / ITEMS_PER_PAGE));
+        const start = suggestedPage * ITEMS_PER_PAGE;
+        const items = filteredSuggestions.slice(start, start + ITEMS_PER_PAGE);
+
+        $('#suggestedCount').text(total + ' games');
+
+        if (items.length === 0) {
+            $('#suggestedContent').html('<p class="text-muted mb-0">No suggestions match your filters.</p>');
+            $('#suggestedPagination').addClass('d-none');
+            return;
+        }
+
+        let html = '<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">';
+        items.forEach(function(item) {
+            const name = $('<span>').text(item.name).html();
+            const publisher = $('<span>').text(item.publisher || '').html();
+            const escapedName = $('<span>').text(item.name).html().replace(/'/g, "\\'");
+
+            // Card image: banner_url > screenshot > icon_url > placeholder
+            const imageUrl = item.banner_url || item.screenshot || item.icon_url || '';
+            let imageHtml;
+            if (imageUrl) {
+                imageHtml = '<img src="' + $('<span>').text(imageUrl).html() + '" ' +
+                    'class="card-img-top" ' +
+                    'style="height:160px;object-fit:cover;cursor:pointer;" ' +
+                    'alt="" loading="lazy" ' +
+                    'onclick="openLightbox(this.src)">';
+            } else {
+                imageHtml = '<div class="card-img-top bg-secondary d-flex align-items-center justify-content-center" style="height:160px;">' +
+                    '<i class="bi bi-controller text-white" style="font-size:2rem;"></i></div>';
+            }
+
+            // Release date + upcoming badge
+            let metaHtml = '';
+            if (item.is_unreleased) {
+                metaHtml += '<span class="badge bg-info me-1" style="font-size:0.65rem;">Upcoming</span>';
+            }
+            if (item.release_date) {
+                const rd = String(item.release_date).substring(0, 10);
+                metaHtml += '<small class="text-muted">' + $('<span>').text(rd).html() + '</small> ';
+            }
+
+            // Category badges
+            const catString = catStr(item.category);
+            if (catString) {
+                catString.split(',').forEach(function(c) {
+                    c = c.trim();
+                    if (c && /[a-zA-Z]/.test(c)) {
+                        metaHtml += '<span class="badge bg-secondary bg-opacity-25 text-body-secondary me-1" style="font-size:0.65rem;">' + $('<span>').text(c).html() + '</span>';
+                    }
+                });
+            }
+
+            // Intro text — 200 char limit, 3-line clamp
+            let introHtml = '';
+            if (item.intro) {
+                let introText = item.intro.length > 200 ? item.intro.substring(0, 200) + '...' : item.intro;
+                introHtml = '<div class="text-muted small mt-1" style="font-size:0.75rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">' + $('<span>').text(introText).html() + '</div>';
+            }
+
+            html += '<div class="col">' +
+                '<div class="card h-100 shadow-sm">' +
+                    imageHtml +
+                    '<div class="card-body p-2">' +
+                        '<div class="fw-semibold" style="font-size:0.9rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;" title="' + name + '">' + name + '</div>' +
+                        (publisher ? '<div class="text-muted" style="font-size:0.75rem;">' + publisher + '</div>' : '') +
+                        '<div class="mt-1">' + metaHtml + '</div>' +
+                        introHtml +
+                        '<div class="text-end mt-2">' +
+                            '<button class="btn btn-sm btn-outline-info" onclick="searchForGame(\'' + escapedName + '\', \'\')" title="Search">' +
+                                '<i class="bi bi-search"></i> Search' +
+                            '</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        });
+        html += '</div>';
+        $('#suggestedContent').html(html);
+
+        // Pagination controls
+        if (totalPages > 1) {
+            $('#suggestedPagination').removeClass('d-none');
+            $('#pageIndicator').text('Page ' + (suggestedPage + 1) + ' of ' + totalPages);
+            $('#prevPageBtn').prop('disabled', suggestedPage === 0);
+            $('#nextPageBtn').prop('disabled', suggestedPage >= totalPages - 1);
+        } else {
+            $('#suggestedPagination').addClass('d-none');
+        }
+    }
+
+    // Typeahead search with debounce
+    let suggestedSearchTimer = null;
+    $('#suggestedSearch').on('input', function() {
+        clearTimeout(suggestedSearchTimer);
+        const val = $(this).val();
+        $('#clearSuggestedSearch').toggle(val.length > 0);
+        suggestedSearchTimer = setTimeout(function() { applyFiltersAndRender(); }, 200);
+    });
+    $('#clearSuggestedSearch').on('click', function() {
+        $('#suggestedSearch').val('');
+        $(this).hide();
+        applyFiltersAndRender();
+    });
+
+    // Lightbox
+    function openLightbox(src) {
+        $('#lightboxImg').attr('src', src);
+        $('#imageLightbox').css('display', 'flex');
+    }
+    function closeLightbox() {
+        $('#imageLightbox').hide();
+        $('#lightboxImg').attr('src', '');
+    }
+    $(document).on('keydown', function(e) {
+        if (e.key === 'Escape') closeLightbox();
+    });
+
+    $('#genreFilter, #publisherFilter').on('change', function() { applyFiltersAndRender(); });
+
+    $('#sortNewBtn, #sortAzBtn, #sortUpcomingBtn').on('click', function() {
+        $('#sortNewBtn, #sortAzBtn, #sortUpcomingBtn').removeClass('active');
+        $(this).addClass('active');
+        suggestedSort = $(this).data('sort');
+        applyFiltersAndRender();
+    });
+
+    $('#prevPageBtn').on('click', function() {
+        if (suggestedPage > 0) { suggestedPage--; renderSuggestedContent(); }
+    });
+    $('#nextPageBtn').on('click', function() {
+        const totalPages = Math.ceil(filteredSuggestions.length / ITEMS_PER_PAGE);
+        if (suggestedPage < totalPages - 1) { suggestedPage++; renderSuggestedContent(); }
+    });
+
+    function searchForGame(gameName, titleId) {
+        currentSearchTitleId = titleId;
+        $('#searchQuery').val(gameName);
+        $('html, body').animate({ scrollTop: $('#searchCard').offset().top - 20 }, 300);
+        doSearch();
+    }
+
+    // --- Search ---
+
+    let lastSearchData = null;
+    let lastActiveDownloads = [];
+
+    function doSearch() {
+        const query = $('#searchQuery').val().trim();
+        if (!query) return;
+
+        $('#searchResults').html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Searching...</div>');
+        $('#switchFilterToggle').hide();
+
+        // Fetch search results and active downloads in parallel
+        $.when(
+            $.get('/api/downloads/search', { query: query }),
+            $.get('/api/downloads/active')
+        ).done(function(searchResp, downloadsResp) {
+            const data = searchResp[0];
+            const activeDownloads = (downloadsResp[0].downloads || []);
+            lastSearchData = data;
+            lastActiveDownloads = activeDownloads;
+            renderSearchResults(data, activeDownloads);
+        }).fail(function() {
+            $('#searchResults').html('<p class="text-danger mb-0">Search failed.</p>');
+        });
+    }
+
+    function renderSearchResults(data, activeDownloads) {
+        if (!data.results || data.results.length === 0) {
+            $('#searchResults').html('<p class="text-muted mb-0">No results found.</p>');
+            $('#switchFilterToggle').hide();
+            return;
+        }
+
+        const activeNames = new Set(activeDownloads.map(d => (d.name || '').toLowerCase()));
+        const switchOnly = $('#switchOnlyFilter').is(':checked');
+        let hasNonSwitch = false;
+        let html = '';
+
+        // "Already owned" banner
+        if (currentSearchTitleId && ownedTitleIds.has(currentSearchTitleId.toUpperCase())) {
+            html += '<div class="alert alert-info py-2 mb-2"><i class="bi bi-check-circle"></i> You already own the base game for this title.</div>';
+        }
+
+        html += '<table class="table table-sm table-hover mb-0"><thead><tr>' +
+            '<th>Title</th><th>Size</th><th>Seeders</th><th>Indexer</th><th></th>' +
+            '</tr></thead><tbody>';
+
+        let visibleCount = 0;
+        data.results.forEach(function(r) {
+            const platformWarn = detectPlatformWarning(r.title);
+            if (platformWarn) hasNonSwitch = true;
+            if (switchOnly && platformWarn) return; // skip non-Switch
+
+            visibleCount++;
+            const title = $('<span>').text(r.title).html();
+            const titleId = currentSearchTitleId;
+
+            // Badges
+            let badges = '';
+            if (platformWarn) {
+                badges += ' <span class="badge bg-warning text-dark">' + platformWarn + '</span>';
+            }
+            if (activeNames.has(r.title.toLowerCase())) {
+                badges += ' <span class="badge bg-info">Downloading</span>';
+            }
+
+            const dlBtn = r.downloadUrl
+                ? '<button class="btn btn-sm btn-outline-success download-btn" ' +
+                    'data-url="' + $('<span>').text(r.downloadUrl).html() + '" ' +
+                    'data-titleid="' + $('<span>').text(titleId).html() + '">' +
+                    '<i class="bi bi-download"></i></button>'
+                : '<span class="text-muted">N/A</span>';
+            html += '<tr>' +
+                '<td class="text-truncate" style="max-width:400px;" title="' + title + '">' + title + badges + '</td>' +
+                '<td>' + formatSize(r.size) + '</td>' +
+                '<td><span class="badge ' + (r.seeders > 0 ? 'bg-success' : 'bg-secondary') + '">' + r.seeders + '</span></td>' +
+                '<td><small class="text-muted">' + $('<span>').text(r.indexer).html() + '</small></td>' +
+                '<td>' + dlBtn + '</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table>';
+
+        if (visibleCount === 0) {
+            html = '<p class="text-muted mb-0">No Switch-compatible results found. Uncheck the filter below to see all results.</p>';
+        }
+
+        $('#switchFilterToggle').toggle(hasNonSwitch);
+        $('#searchResults').html(html);
+    }
+
+    $('#searchQuery').on('keypress', function(e) {
+        if (e.which === 13) doSearch();
+    });
+
+    // Clear title_id association when user manually types a search
+    $('#searchQuery').on('input', function() {
+        currentSearchTitleId = '';
+    });
+
+    function addDownload(url, titleId) {
+        $.ajax({
+            url: '/api/downloads/add',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ download_url: url, title_id: titleId || '' }),
+            success: function() {
+                refreshDownloads();
+            },
+            error: function(xhr) {
+                const msg = xhr.responseJSON ? xhr.responseJSON.message : 'Failed to add download';
+                alert(msg);
+            }
+        });
+    }
+
+    $(document).on('click', '.download-btn', function() {
+        addDownload($(this).data('url'), $(this).data('titleid'));
+    });
+
+    $(document).on('click', '.retry-search-btn', function() {
+        retrySearch($(this).data('name'), $(this).data('titleid'));
+    });
+
+    // --- Active Downloads ---
+
+    let previousDownloadStatuses = {};
+
+    function refreshDownloads() {
+        $.get('/api/downloads/active', function(data) {
+            if (!data.downloads || data.downloads.length === 0) {
+                $('#activeDownloads').html('<p class="text-muted mb-0">No active downloads.</p>');
+                previousDownloadStatuses = {};
+                return;
+            }
+
+            // Check if any download transitioned to "verified" — refresh missing content
+            let newlyVerified = false;
+            data.downloads.forEach(function(d) {
+                const prev = previousDownloadStatuses[d.hash];
+                if (d.status === 'verified' && prev && prev !== 'verified') {
+                    newlyVerified = true;
+                }
+            });
+            if (newlyVerified) {
+                // Refresh immediately, then again after delays to catch the library scan completing
+                loadMissingContent();
+                setTimeout(loadMissingContent, 5000);
+                setTimeout(loadMissingContent, 15000);
+            }
+
+            // Track statuses for next refresh
+            let newStatuses = {};
+            data.downloads.forEach(function(d) {
+                newStatuses[d.hash] = d.status;
+            });
+            previousDownloadStatuses = newStatuses;
+
+            let html = '<table class="table table-sm table-hover mb-0"><thead><tr>' +
+                '<th>Name</th><th>Size</th><th>Progress</th><th>Speed</th><th>ETA</th><th>Status</th><th></th>' +
+                '</tr></thead><tbody>';
+            data.downloads.forEach(function(d) {
+                const name = $('<span>').text(d.name).html();
+
+                let statusBadge;
+                if (d.status === 'verified') {
+                    statusBadge = '<span class="badge bg-success">Verified</span>';
+                    if (d.copied_to && d.copied_to.length > 0) {
+                        const copiedFile = d.copied_to[0].split('/').pop();
+                        statusBadge += ' <small class="text-muted">' + $('<span>').text(copiedFile).html() + '</small>';
+                    }
+                } else if (d.status === 'failed') {
+                    statusBadge = '<span class="badge bg-danger">Failed</span>';
+                    if (d.failed_reason) {
+                        statusBadge += ' <small class="text-danger">' + $('<span>').text(d.failed_reason).html() + '</small>';
+                    }
+                } else if (d.status === 'completed') {
+                    statusBadge = '<span class="badge bg-info">Verifying...</span>';
+                } else {
+                    statusBadge = '<span class="badge bg-primary">' + d.progress + '%</span>';
+                }
+
+                let actions = '';
+                if (d.status === 'failed') {
+                    actions = '<div class="btn-group btn-group-sm">' +
+                        '<button class="btn btn-outline-info retry-search-btn" ' +
+                            'data-name="' + $('<span>').text(d.name || '').html() + '" ' +
+                            'data-titleid="' + $('<span>').text(d.title_id || '').html() + '" title="Search again">' +
+                            '<i class="bi bi-search"></i></button>' +
+                        '<button class="btn btn-outline-warning" onclick="recheckDownload(\'' + d.hash + '\')" title="Recheck">' +
+                            '<i class="bi bi-arrow-clockwise"></i></button>' +
+                        '<button class="btn btn-outline-danger" onclick="deleteDownload(\'' + d.hash + '\')" title="Delete">' +
+                            '<i class="bi bi-trash"></i></button>' +
+                        '</div>';
+                } else if (d.status === 'downloading') {
+                    actions = '<button class="btn btn-sm btn-outline-danger" onclick="cancelDownload(\'' + d.hash + '\')"><i class="bi bi-x-lg"></i></button>';
+                } else if (d.status === 'verified') {
+                    actions = '<div class="btn-group btn-group-sm">' +
+                        '<button class="btn btn-outline-secondary" onclick="dismissDownload(\'' + d.hash + '\')" title="Dismiss">' +
+                            '<i class="bi bi-check-lg"></i></button>' +
+                        '<button class="btn btn-outline-danger" onclick="deleteDownload(\'' + d.hash + '\')" title="Delete">' +
+                            '<i class="bi bi-trash"></i></button>' +
+                        '</div>';
+                }
+
+                html += '<tr>' +
+                    '<td class="text-truncate" style="max-width:350px;" title="' + name + '">' + name + '</td>' +
+                    '<td>' + formatSize(d.size) + '</td>' +
+                    '<td>' +
+                        '<div class="progress" style="min-width:80px;height:20px;">' +
+                            '<div class="progress-bar' +
+                                (d.status === 'verified' ? ' bg-success' : d.status === 'failed' ? ' bg-danger' : '') +
+                                '" style="width:' + d.progress + '%"></div>' +
+                        '</div>' +
+                    '</td>' +
+                    '<td>' + formatSpeed(d.download_speed) + '</td>' +
+                    '<td>' + formatEta(d.eta) + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + actions + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table>';
+            $('#activeDownloads').html(html);
+        }).fail(function() {
+            $('#activeDownloads').html('<p class="text-danger mb-0">Failed to load downloads.</p>');
+        });
+    }
+
+    function cancelDownload(hash) {
+        if (!confirm('Remove this download?')) return;
+        $.ajax({
+            url: '/api/downloads/' + hash,
+            type: 'DELETE',
+            success: function() { refreshDownloads(); }
+        });
+    }
+
+    function dismissDownload(hash) {
+        $.ajax({
+            url: '/api/downloads/' + hash + '/dismiss',
+            type: 'POST',
+            success: function() { refreshDownloads(); }
+        });
+    }
+
+    function recheckDownload(hash) {
+        $.ajax({
+            url: '/api/downloads/' + hash + '/recheck',
+            type: 'POST',
+            success: function() { refreshDownloads(); }
+        });
+    }
+
+    function deleteDownload(hash) {
+        if (!confirm('Delete this download and remove from Transmission?')) return;
+        $.ajax({
+            url: '/api/downloads/' + hash + '/delete',
+            type: 'DELETE',
+            success: function() { refreshDownloads(); }
+        });
+    }
+
+    function retrySearch(name, titleId) {
+        currentSearchTitleId = titleId || '';
+        $('#searchQuery').val(name);
+        $('html, body').animate({ scrollTop: $('#searchCard').offset().top - 20 }, 300);
+        doSearch();
+    }
+
+    $(document).ready(function() {
+        loadMissingContent();
+        loadSuggestedContent();
+        refreshDownloads();
+        setInterval(refreshDownloads, 10000);
+    });
+</script>
+{% endblock %}

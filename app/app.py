@@ -18,6 +18,8 @@ from auth import *
 import titles as titles_lib
 from utils import *
 from library import *
+from combine import combine_title, combine_all_titles, get_combined_file
+from downloads import prowlarr as prowlarr_client, torrent_client, manager as download_manager, suggested as suggested_content
 import titledb
 import os
 
@@ -44,6 +46,15 @@ def init():
     init_scheduler(app)
     scan_interval_str = app_settings.get('scheduler', {}).get('scan_interval', '12h')
     schedule_update_and_scan_job(app, scan_interval_str, run_first=True, run_once=True)
+
+    # Check for completed downloads every 30 seconds
+    from datetime import timedelta
+    app.scheduler.add_job(
+        job_id='check_completed_downloads',
+        func=lambda: download_manager.check_completed_downloads(app, load_settings()),
+        interval=timedelta(seconds=30),
+        run_first=False
+    )
 
 os.makedirs(CONFIG_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -310,6 +321,35 @@ def set_shop_settings_api():
     } 
     return jsonify(resp)
 
+@app.get('/api/browse-directories')
+@access_required('admin')
+def browse_directories_api():
+    """List directories under a given path prefix for autocomplete."""
+    prefix = request.args.get('prefix', '/')
+    if not prefix.startswith('/'):
+        prefix = '/' + prefix
+
+    parent = prefix if prefix.endswith('/') else os.path.dirname(prefix)
+    partial = '' if prefix.endswith('/') else os.path.basename(prefix)
+
+    # Resolve symlinks and .. to prevent traversal
+    parent = os.path.realpath(parent)
+
+    try:
+        if not os.path.isdir(parent):
+            return jsonify({'directories': []})
+        entries = []
+        for name in sorted(os.listdir(parent)):
+            if partial and not name.lower().startswith(partial.lower()):
+                continue
+            full = os.path.join(parent, name)
+            if os.path.isdir(full):
+                entries.append(full + '/')
+        return jsonify({'directories': entries})
+    except PermissionError:
+        return jsonify({'directories': []})
+
+
 @app.route('/api/settings/library/paths', methods=['GET', 'POST', 'DELETE'])
 @access_required('admin')
 def library_paths_api():
@@ -436,6 +476,59 @@ def get_all_titles_api():
         'games': titles_library
     })
 
+@app.route('/api/titles/grouped', methods=['GET'])
+@access_required('shop')
+def get_grouped_titles_api():
+    games = generate_grouped_library()
+    return jsonify({
+        'total': len(games),
+        'games': games
+    })
+
+@app.route('/title/<title_id>')
+@access_required('shop')
+def title_detail_page(title_id):
+    return render_template('title_detail.html', title='Title Detail', title_id=title_id, admin_account_created=admin_account_created())
+
+@app.route('/api/title/<title_id>', methods=['GET'])
+@access_required('shop')
+def get_title_detail_api(title_id):
+    # Find this title in the grouped library
+    games = generate_grouped_library()
+    game = next((g for g in games if g['title_id'] == title_id), None)
+    if not game:
+        return jsonify({'error': 'Title not found'}), 404
+
+    game = copy.deepcopy(game)
+
+    # Add file info for owned apps
+    title_apps = get_all_title_apps(title_id)
+    files_info = []
+    seen_files = set()
+    for app_data in title_apps:
+        if app_data.get('owned'):
+            app_obj = get_app_by_id_and_version(app_data['app_id'], app_data['app_version'])
+            if app_obj:
+                for f in app_obj.files:
+                    if f.id not in seen_files:
+                        seen_files.add(f.id)
+                        files_info.append({
+                            'id': f.id,
+                            'filename': f.filename,
+                            'filepath': f.filepath,
+                            'size': f.size,
+                            'extension': f.extension,
+                        })
+
+    game['files'] = files_info
+
+    # Add required firmware version
+    titles_lib.load_titledb()
+    game['required_firmware'] = titles_lib.get_title_required_firmware(title_id)
+    titles_lib.unload_titledb()
+
+    return jsonify(game)
+
 @app.route('/api/get_game/<int:id>')
 @tinfoil_access
 def serve_game(id):
@@ -443,6 +536,216 @@ def serve_game(id):
     filepath = db.session.query(Files.filepath).filter_by(id=id).first()[0]
     filedir, filename = os.path.split(filepath)
     return send_from_directory(filedir, filename)
+
+
+@app.route('/api/download/file/<int:id>')
+@access_required('shop')
+def download_file(id):
+    file_entry = db.session.query(Files).filter_by(id=id).first()
+    if not file_entry:
+        return jsonify({'error': 'File not found'}), 404
+    filedir, filename = os.path.split(file_entry.filepath)
+    return send_from_directory(filedir, filename, as_attachment=True)
+
+
+@app.route('/api/download/combined/<title_id>')
+@access_required('shop')
+def download_combined(title_id):
+    reload_conf()
+    output_dir = app_settings['library']['management'].get('combine_xci', {}).get('output_path', '/combined')
+    combined = get_combined_file(title_id, output_dir)
+    if not combined:
+        return jsonify({'error': 'No combined XCI found'}), 404
+    filedir, filename = os.path.split(combined)
+    return send_from_directory(filedir, filename, as_attachment=True)
+
+
+@app.post('/api/combine/<title_id>')
+@access_required('shop')
+def combine_title_api(title_id):
+    reload_conf()
+    output_dir = app_settings['library']['management'].get('combine_xci', {}).get('output_path', '/combined')
+    keys_path = KEYS_FILE if os.path.exists(KEYS_FILE) else None
+
+    def run_combine():
+        with app.app_context():
+            combine_title(title_id, output_dir, keys_path)
+
+    t = threading.Thread(target=run_combine)
+    t.daemon = True
+    t.start()
+    return jsonify({'status': 'started'})
+
+
+@app.post('/api/combine/all')
+@access_required('admin')
+def combine_all_api():
+    reload_conf()
+    output_dir = app_settings['library']['management'].get('combine_xci', {}).get('output_path', '/combined')
+    keys_path = KEYS_FILE if os.path.exists(KEYS_FILE) else None
+
+    def run_combine_all():
+        combine_all_titles(app.app_context(), output_dir, keys_path)
+
+    t = threading.Thread(target=run_combine_all)
+    t.daemon = True
+    t.start()
+    return jsonify({'status': 'started'})
+
+
+@app.get('/api/combine/status/<title_id>')
+@access_required('shop')
+def combine_status_api(title_id):
+    reload_conf()
+    output_dir = app_settings['library']['management'].get('combine_xci', {}).get('output_path', '/combined')
+    # Only report exists if the combine state confirms it's done (not mid-write)
+    from combine import get_combine_state
+    state = get_combine_state()
+    if title_id in state:
+        combined = get_combined_file(title_id, output_dir)
+        if combined and os.path.exists(combined):
+            return jsonify({
+                'exists': True,
+                'filename': os.path.basename(combined),
+                'size': os.path.getsize(combined)
+            })
+    return jsonify({'exists': False})
+
+
+## Downloads routes
+
+@app.post('/api/settings/downloads')
+@access_required('admin')
+def set_downloads_settings_api():
+    data = request.json
+    set_downloads_settings(data)
+    reload_conf()
+    return jsonify({'success': True, 'errors': []})
+
+
+@app.post('/api/downloads/test/prowlarr')
+@access_required('admin')
+def test_prowlarr_api():
+    data = request.json
+    result = prowlarr_client.test_connection(data.get('url', ''), data.get('api_key', ''))
+    return jsonify(result)
+
+
+@app.post('/api/downloads/test/torrent')
+@access_required('admin')
+def test_torrent_api():
+    data = request.json
+    result = torrent_client.test_connection(
+        url=data.get('url', ''),
+        username=data.get('username', ''),
+        password=data.get('password', '')
+    )
+    return jsonify(result)
+
+
+@app.get('/api/downloads/indexers')
+@access_required('admin')
+def get_indexers_api():
+    reload_conf()
+    url = request.args.get('url', '')
+    api_key = request.args.get('api_key', '')
+    if not url or not api_key:
+        p = app_settings.get('downloads', {}).get('prowlarr', {})
+        url = url or p.get('url', '')
+        api_key = api_key or p.get('api_key', '')
+    indexers = prowlarr_client.get_indexers(url, api_key)
+    return jsonify(indexers)
+
+
+@app.get('/api/downloads/search')
+@access_required('shop')
+def search_downloads_api():
+    reload_conf()
+    query = request.args.get('query', '')
+    if not query:
+        return jsonify({'results': []})
+    try:
+        results = download_manager.search_content(app_settings, query)
+    except Exception as e:
+        return jsonify({'results': [], 'error': str(e)}), 500
+    return jsonify({'results': results})
+
+
+@app.post('/api/downloads/add')
+@access_required('shop')
+def add_download_api():
+    reload_conf()
+    data = request.json
+    try:
+        torrent_hash = download_manager.start_download(
+            settings=app_settings,
+            download_url=data.get('download_url', ''),
+            title_id=data.get('title_id', ''),
+            content_type=data.get('content_type', '')
+        )
+        return jsonify({'status': 'added', 'hash': torrent_hash})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.get('/api/downloads/active')
+@access_required('shop')
+def active_downloads_api():
+    reload_conf()
+    downloads = download_manager.get_active_downloads(app_settings)
+    return jsonify({'downloads': downloads})
+
+
+@app.delete('/api/downloads/<torrent_hash>')
+@access_required('shop')
+def cancel_download_api(torrent_hash):
+    reload_conf()
+    success, error = download_manager.cancel_download(app_settings, torrent_hash)
+    if not success:
+        return jsonify({'status': 'error', 'message': f'Failed to remove torrent from Transmission: {error}'}), 500
+    return jsonify({'status': 'removed'})
+
+
+@app.post('/api/downloads/<torrent_hash>/dismiss')
+@access_required('shop')
+def dismiss_download_api(torrent_hash):
+    download_manager.dismiss_download(torrent_hash)
+    return jsonify({'status': 'dismissed'})
+
+
+@app.post('/api/downloads/<torrent_hash>/recheck')
+@access_required('shop')
+def recheck_download_api(torrent_hash):
+    download_manager.recheck_download(torrent_hash)
+    return jsonify({'status': 'rechecking'})
+
+
+@app.delete('/api/downloads/<torrent_hash>/delete')
+@access_required('shop')
+def delete_download_api(torrent_hash):
+    reload_conf()
+    success, error = download_manager.delete_download(app_settings, torrent_hash)
+    if not success:
+        return jsonify({'status': 'error', 'message': error}), 500
+    return jsonify({'status': 'deleted'})
+
+
+@app.get('/api/titles/suggested')
+@access_required('shop')
+def get_suggested_titles_api():
+    titles_lib.load_titledb()
+    owned_ids = get_owned_base_title_ids()
+    suggestions = suggested_content.build_suggestions_from_titledb(
+        None,  # titles_db accessed via global in titles_lib
+        owned_ids
+    )
+    return jsonify({'suggestions': suggestions})
+
+
+@app.route('/downloads')
+@access_required('shop')
+def downloads_page():
+    return render_template('downloads.html', title='Downloads', admin_account_created=admin_account_created())
 
 
 @debounce(10, key='post_library_change')
@@ -458,8 +761,20 @@ def post_library_change():
         # The process_library_identification already handles updating titles and generating library
         # So, we just need to ensure titles_library is updated from the generated library
         generate_library()
+        generate_grouped_library()
         titles_lib.identification_in_progress_count -= 1
         titles_lib.unload_titledb()
+
+        # Auto-combine if enabled
+        combine_settings = load_settings().get('library', {}).get('management', {}).get('combine_xci', {})
+        if combine_settings.get('enabled'):
+            output_dir = combine_settings.get('output_path', '/combined')
+            keys_path = KEYS_FILE if os.path.exists(KEYS_FILE) else None
+            def run_auto_combine():
+                combine_all_titles(app.app_context(), output_dir, keys_path)
+            t = threading.Thread(target=run_auto_combine)
+            t.daemon = True
+            t.start()
 
 @app.post('/api/library/scan')
 @access_required('admin')
@@ -512,6 +827,12 @@ def update_and_scan_job():
     with titledb_update_lock:
         is_titledb_update_running = True
     
+    # Invalidate suggested content cache so it rebuilds from fresh TitleDB
+    try:
+        suggested_content.refresh_cache()
+    except Exception as e:
+        logger.error(f"Error refreshing suggested content cache: {e}")
+
     logger.info("Starting TitleDB update...")
     try:
         settings = load_settings()

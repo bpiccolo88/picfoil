@@ -638,6 +638,17 @@ def get_library_status(title_id):
     }
     return library_status
 
+def get_owned_base_title_ids():
+    """Return a set of title_ids where the user owns the base game."""
+    titles = get_all_titles()
+    owned = set()
+    for title in titles:
+        if title.have_base:
+            owned.add(title.title_id.upper())
+            owned.add(title.title_id.lower())
+    return owned
+
+
 def compute_apps_hash():
     """
     Computes a hash of all Apps table content to detect changes in library state.
@@ -806,3 +817,179 @@ def generate_library():
     logger.info(f'Generating library done.')
 
     return library_data['library']
+
+GROUPED_LIBRARY_CACHE_FILE = os.path.join(CACHE_DIR, 'library_grouped.json')
+
+def is_grouped_library_unchanged():
+    cache_path = Path(GROUPED_LIBRARY_CACHE_FILE)
+    if not cache_path.exists():
+        return False
+    try:
+        with cache_path.open("r", encoding="utf-8") as f:
+            saved = json.load(f)
+    except:
+        return False
+    if not saved.get('hash'):
+        return False
+    return saved['hash'] == compute_apps_hash()
+
+def generate_grouped_library():
+    """Generate a title-centric library: one entry per game title."""
+    if is_grouped_library_unchanged():
+        cache_path = Path(GROUPED_LIBRARY_CACHE_FILE)
+        try:
+            with cache_path.open("r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if saved.get('library'):
+                return saved['library']
+        except:
+            pass
+
+    logger.info('Generating grouped library ...')
+    titles_lib.load_titledb()
+    all_apps = get_all_apps()
+    grouped = {}
+
+    for app_data in all_apps:
+        has_none = any(v is None for v in app_data.values())
+        if has_none:
+            continue
+
+        title_id = app_data['title_id']
+        if title_id not in grouped:
+            title_info = titles_lib.get_game_info(title_id)
+            title_obj = get_title(title_id)
+            grouped[title_id] = {
+                'title_id': title_id,
+                'name': title_info['name'] if title_info else 'Unrecognized',
+                'bannerUrl': title_info['bannerUrl'] if title_info else '',
+                'iconUrl': title_info['iconUrl'] if title_info else '',
+                'has_base': title_obj.have_base if title_obj else False,
+                'base_owned': title_obj.have_base if title_obj else False,
+                'has_latest_version': title_obj.up_to_date if title_obj else False,
+                'has_all_dlcs': title_obj.complete if title_obj else False,
+                'updates': [],
+                'dlcs': [],
+                '_update_apps': [],
+                '_dlc_apps': [],
+            }
+
+        entry = grouped[title_id]
+        if app_data['app_type'] == APP_TYPE_UPD:
+            entry['_update_apps'].append(app_data)
+        elif app_data['app_type'] == APP_TYPE_DLC:
+            entry['_dlc_apps'].append(app_data)
+
+    # Now build update/DLC summaries for each title
+    for title_id, entry in grouped.items():
+        # Updates
+        available_versions = titles_lib.get_all_existing_versions(title_id)
+        version_release_dates = {v['version']: v['release_date'] for v in available_versions}
+        owned_update_apps = entry['_update_apps']
+
+        # Build update list from all known versions
+        update_list = []
+        owned_versions_set = set()
+        for ua in owned_update_apps:
+            v = int(ua['app_version'])
+            if ua.get('owned'):
+                owned_versions_set.add(v)
+
+        all_known_versions = set(v['version'] for v in available_versions)
+        for ua in owned_update_apps:
+            all_known_versions.add(int(ua['app_version']))
+
+        # Extract display versions from owned update files
+        display_versions = {}
+        for ua in owned_update_apps:
+            if ua.get('owned'):
+                v = int(ua['app_version'])
+                app_obj = get_app_by_id_and_version(ua['app_id'], ua['app_version'])
+                if app_obj and app_obj.files:
+                    filepath = app_obj.files[0].filepath
+                    dv = titles_lib.extract_display_version(filepath)
+                    if dv:
+                        display_versions[v] = dv
+
+        for v in sorted(all_known_versions):
+            if v == 0:
+                continue
+            update_list.append({
+                'version': v,
+                'update_number': titles_lib.get_update_number(v),
+                'release_date': version_release_dates.get(v, 'Unknown'),
+                'owned': v in owned_versions_set,
+                'display_version': display_versions.get(v),
+            })
+
+        entry['updates'] = update_list
+
+        # Compute human-readable update summary
+        if update_list:
+            owned_updates = [u for u in update_list if u['owned']]
+            latest_update_num = update_list[-1]['update_number']
+            entry['latest_update'] = f"Update {latest_update_num}"
+            if owned_updates:
+                highest_owned_update = max(owned_updates, key=lambda u: u['update_number'])
+                highest_owned = highest_owned_update['update_number']
+                owned_dv = highest_owned_update.get('display_version')
+                entry['update_summary'] = f"Update {highest_owned}"
+                entry['owned_display_version'] = owned_dv
+            else:
+                entry['update_summary'] = 'None'
+                entry['owned_display_version'] = None
+        else:
+            entry['update_summary'] = 'None'
+            entry['latest_update'] = 'None'
+            entry['owned_display_version'] = None
+
+        # DLCs
+        dlc_apps = entry['_dlc_apps']
+        # Also get all known DLC IDs from titledb
+        all_dlc_ids = titles_lib.get_all_existing_dlc(title_id)
+        # Add any DLC IDs from owned apps
+        for da in dlc_apps:
+            if da['app_id'] not in all_dlc_ids:
+                all_dlc_ids.append(da['app_id'])
+
+        # Build DLC list - one entry per DLC app_id (latest version)
+        dlc_by_id = {}
+        for da in dlc_apps:
+            aid = da['app_id']
+            if aid not in dlc_by_id or int(da['app_version']) > int(dlc_by_id[aid]['app_version']):
+                dlc_by_id[aid] = da
+
+        dlc_list = []
+        for dlc_id in sorted(all_dlc_ids):
+            dlc_info = titles_lib.get_game_info(dlc_id)
+            dlc_name = dlc_info['name'] if dlc_info and dlc_info['name'] != 'Unrecognized' else dlc_id
+            owned = False
+            if dlc_id in dlc_by_id:
+                owned = dlc_by_id[dlc_id].get('owned', False)
+            dlc_list.append({
+                'app_id': dlc_id,
+                'name': dlc_name,
+                'owned': owned,
+            })
+
+        entry['dlcs'] = dlc_list
+        entry['dlc_owned_count'] = sum(1 for d in dlc_list if d['owned'])
+        entry['dlc_total_count'] = len(dlc_list)
+
+        # Clean up temp keys
+        del entry['_update_apps']
+        del entry['_dlc_apps']
+
+    games = sorted(grouped.values(), key=lambda x: (x['name'] or 'Unrecognized').lower())
+
+    # Cache
+    cache_data = {'hash': compute_apps_hash(), 'library': games}
+    cache_path = Path(GROUPED_LIBRARY_CACHE_FILE)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_write_json(cache_path, cache_data)
+
+    titles_lib.identification_in_progress_count -= 1
+    titles_lib.unload_titledb()
+
+    logger.info('Generating grouped library done.')
+    return games

@@ -99,6 +99,13 @@ def access_required(access: str):
                 # Auth disabled, request ok
                 return f(*args, **kwargs)
 
+            # Allow unauthenticated access to shop endpoints when shop is public
+            if access == 'shop':
+                from settings import load_settings
+                settings = load_settings()
+                if settings.get('shop', {}).get('public', False):
+                    return f(*args, **kwargs)
+
             if not current_user.is_authenticated:
                 # return unauthorized_json()
                 return login_manager.unauthorized()

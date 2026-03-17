@@ -10,3 +10,5 @@ unzip_http==0.6
 watchdog==6.0.0
 Werkzeug==3.1.5
 zstandard==0.25.0
+rich
+art

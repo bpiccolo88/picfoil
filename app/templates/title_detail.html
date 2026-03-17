@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include 'nav.html' %}
+<div class="container mt-4" id="detail-content">
+    <div class="mb-3">
+        <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Back to Library</a>
+    </div>
+
+    <div id="loading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <div id="detail" style="display:none;">
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <img id="gameBanner" class="img-fluid rounded" src="" alt="Banner">
+            </div>
+            <div class="col-md-8 d-flex flex-column justify-content-center">
+                <h2 id="gameName" class="mb-2"></h2>
+                <p class="text-muted mb-1"><code id="gameTitleId"></code></p>
+                <div id="statusBadges" class="mt-2"></div>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header"><h5 class="mb-0">Base Game</h5></div>
+            <div class="card-body" id="baseSection"></div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header"><h5 class="mb-0">Updates</h5></div>
+            <div class="card-body" id="updatesSection"></div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header"><h5 class="mb-0">DLC</h5></div>
+            <div class="card-body" id="dlcSection"></div>
+        </div>
+
+        <div class="card mb-3" id="filesCard" style="display:none;">
+            <div class="card-header"><h5 class="mb-0">Files</h5></div>
+            <div class="card-body" id="filesSection"></div>
+        </div>
+
+        <div class="card mb-3" id="combinedCard" style="display:none;">
+            <div class="card-header"><h5 class="mb-0">Combined XCI</h5></div>
+            <div class="card-body" id="combinedSection">
+                <div id="combineStatus">Checking...</div>
+            </div>
+        </div>
+
+        <div class="card mb-3" id="searchCard" style="display:none;">
+            <div class="card-header"><h5 class="mb-0">Download Search</h5></div>
+            <div class="card-body">
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="dlSearchQuery" placeholder="Search...">
+                    <button class="btn btn-primary" onclick="runSearch()"><i class="bi bi-search"></i></button>
+                </div>
+                <div id="dlSearchResults"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const titleId = "{{ title_id }}";
+
+    function formatSize(bytes) {
+        if (!bytes) return 'Unknown';
+        const gb = bytes / (1024 * 1024 * 1024);
+        if (gb >= 1) return gb.toFixed(2) + ' GB';
+        const mb = bytes / (1024 * 1024);
+        return mb.toFixed(1) + ' MB';
+    }
+
+    $(document).ready(function() {
+        $.get(`/api/title/${titleId}`, function(game) {
+            $('#loading').hide();
+            $('#detail').show();
+
+            $('#gameBanner').attr('src', game.bannerUrl);
+            $('#gameName').text(game.name);
+            $('#gameTitleId').text(game.title_id);
+
+            // Status badges
+            const badges = $('#statusBadges');
+            badges.append(`<span class="badge me-2 ${game.base_owned ? 'bg-success' : 'bg-warning'}">Base: ${game.base_owned ? 'Owned' : 'Missing'}</span>`);
+            badges.append(`<span class="badge me-2 ${game.has_latest_version ? 'bg-success' : 'bg-warning'}">Updates: ${game.has_latest_version ? 'Up to Date' : 'Outdated'}</span>`);
+            badges.append(`<span class="badge me-2 ${game.has_all_dlcs ? 'bg-success' : 'bg-warning'}">DLC: ${game.has_all_dlcs ? 'Complete' : 'Incomplete'}</span>`);
+            if (game.required_firmware) {
+                badges.append(`<span class="badge me-2 bg-info">Firmware: ${game.required_firmware}</span>`);
+            }
+            if (!game.has_latest_version || !game.has_all_dlcs) {
+                window._gameName = game.name;
+                // Find highest owned update's display_version for smart search annotation
+                const ownedUpdates = (game.updates || []).filter(u => u.owned && u.display_version);
+                if (ownedUpdates.length > 0) {
+                    window._ownedVersion = ownedUpdates[ownedUpdates.length - 1].display_version;
+                }
+                badges.append(`<button class="btn btn-sm btn-outline-info ms-2" onclick="searchDownloads()"><i class="bi bi-search"></i> Search Downloads</button>`);
+            }
+
+            // Base section
+            const baseHtml = game.base_owned
+                ? '<span class="status-owned">Owned</span>'
+                : '<span class="status-missing">Missing</span>';
+            $('#baseSection').html(baseHtml);
+
+            // Updates section
+            if (game.updates && game.updates.length > 0) {
+                let table = '<table class="table table-sm table-hover mb-0"><thead><tr><th>Update</th><th>Version</th><th>Release Date</th><th>Status</th></tr></thead><tbody>';
+                game.updates.forEach(function(u, idx) {
+                    const isLatest = idx === game.updates.length - 1;
+                    const statusClass = u.owned ? 'status-owned' : 'status-missing';
+                    const statusText = u.owned ? 'Owned' : 'Missing';
+                    const versionDisplay = u.display_version ? `v${u.display_version}` : '\u2014';
+                    table += `<tr${isLatest ? ' class="table-active"' : ''}>`;
+                    table += `<td>Update ${u.update_number}</td>`;
+                    table += `<td>${versionDisplay}</td>`;
+                    table += `<td>${u.release_date}</td>`;
+                    table += `<td><span class="${statusClass}">${statusText}</span></td>`;
+                    table += '</tr>';
+                });
+                table += '</tbody></table>';
+                $('#updatesSection').html(table);
+            } else {
+                $('#updatesSection').html('<p class="text-muted mb-0">No updates available.</p>');
+            }
+
+            // DLC section
+            if (game.dlcs && game.dlcs.length > 0) {
+                let table = '<table class="table table-sm table-hover mb-0"><thead><tr><th>DLC Name</th><th>App ID</th><th>Status</th></tr></thead><tbody>';
+                game.dlcs.forEach(function(d) {
+                    const statusClass = d.owned ? 'status-owned' : 'status-missing';
+                    const statusText = d.owned ? 'Owned' : 'Missing';
+                    table += `<tr>`;
+                    table += `<td>${$('<span>').text(d.name).html()}</td>`;
+                    table += `<td><code>${d.app_id}</code></td>`;
+                    table += `<td><span class="${statusClass}">${statusText}</span></td>`;
+                    table += '</tr>';
+                });
+                table += '</tbody></table>';
+                $('#dlcSection').html(table);
+            } else {
+                $('#dlcSection').html('<p class="text-muted mb-0">No DLC available.</p>');
+            }
+
+            // Files section
+            if (game.files && game.files.length > 0) {
+                $('#filesCard').show();
+                let table = '<table class="table table-sm table-hover mb-0"><thead><tr><th>Filename</th><th>Size</th><th>Type</th><th></th></tr></thead><tbody>';
+                game.files.forEach(function(f) {
+                    table += `<tr>`;
+                    table += `<td>${$('<span>').text(f.filename).html()}</td>`;
+                    table += `<td>${formatSize(f.size)}</td>`;
+                    table += `<td><code>${f.extension || ''}</code></td>`;
+                    table += `<td><a href="/api/download/file/${f.id}" class="btn btn-sm btn-outline-primary" title="Download"><i class="bi bi-download"></i></a></td>`;
+                    table += '</tr>';
+                });
+                table += '</tbody></table>';
+                $('#filesSection').html(table);
+
+                // Show combined XCI section if there are multiple files
+                if (game.files.length > 1) {
+                    $('#combinedCard').show();
+                    checkCombineStatus();
+                }
+            }
+        }).fail(function() {
+            $('#loading').html('<p class="text-danger">Failed to load title details.</p>');
+        });
+    });
+
+    function checkCombineStatus() {
+        $.get(`/api/combine/status/${titleId}`, function(data) {
+            if (data.exists) {
+                $('#combineStatus').html(
+                    `<div class="d-flex align-items-center gap-3">` +
+                    `<span>${$('<span>').text(data.filename).html()} (${formatSize(data.size)})</span>` +
+                    `<a href="/api/download/combined/${titleId}" class="btn btn-sm btn-success"><i class="bi bi-download"></i> Download Combined XCI</a>` +
+                    `<button class="btn btn-sm btn-outline-secondary" onclick="buildCombined()"><i class="bi bi-arrow-clockwise"></i> Rebuild</button>` +
+                    `</div>`
+                );
+            } else {
+                $('#combineStatus').html(
+                    `<button class="btn btn-primary" onclick="buildCombined()"><i class="bi bi-box-seam"></i> Build Combined XCI</button>` +
+                    `<div class="form-text">Combine base game, update, and DLC into a single XCI file.</div>`
+                );
+            }
+        }).fail(function() {
+            $('#combineStatus').html('<span class="text-muted">Could not check combine status.</span>');
+        });
+    }
+
+    function buildCombined() {
+        $('#combineStatus').html(
+            '<div class="d-flex align-items-center gap-2">' +
+            '<div class="spinner-border spinner-border-sm text-primary" role="status"></div>' +
+            '<span>Building combined XCI... This may take a while.</span>' +
+            '</div>'
+        );
+        $.post(`/api/combine/${titleId}`, function() {
+            pollCombineStatus();
+        }).fail(function() {
+            $('#combineStatus').html('<span class="text-danger">Failed to start combine.</span>');
+        });
+    }
+
+    function pollCombineStatus() {
+        setTimeout(function() {
+            $.get(`/api/combine/status/${titleId}`, function(data) {
+                if (data.exists) {
+                    checkCombineStatus();
+                } else {
+                    pollCombineStatus();
+                }
+            });
+        }, 5000);
+    }
+
+    function searchDownloads() {
+        $('#searchCard').show();
+        $('#dlSearchQuery').val(window._gameName || '');
+        runSearch();
+    }
+
+    function parseVersionFromTitle(title) {
+        const m = title.match(/[_\s.\-]v?(\d+)[._](\d+)[._](\d+)/i);
+        if (m) return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
+        return null;
+    }
+
+    function classifyTorrent(title) {
+        if (/_Update_/i.test(title) || /\bUpdate\b/i.test(title)) return 'Update';
+        if (/_DLC_/i.test(title) || /\bDLC\b/i.test(title)) return 'DLC';
+        return 'Base';
+    }
+
+    function compareVersions(a, b) {
+        // a, b are [major, minor, patch] arrays
+        for (let i = 0; i < 3; i++) {
+            if (a[i] !== b[i]) return a[i] - b[i];
+        }
+        return 0;
+    }
+
+    function parseOwnedVersion(str) {
+        if (!str) return null;
+        const parts = str.split('.').map(Number);
+        while (parts.length < 3) parts.push(0);
+        return parts;
+    }
+
+    function runSearch() {
+        const query = $('#dlSearchQuery').val().trim();
+        if (!query) return;
+        $('#dlSearchResults').html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Searching...</div>');
+        $.get('/api/downloads/search', { query: query }, function(data) {
+            if (!data.results || data.results.length === 0) {
+                $('#dlSearchResults').html('<p class="text-muted mb-0">No results found.</p>');
+                return;
+            }
+
+            const ownedVer = parseOwnedVersion(window._ownedVersion);
+
+            // Annotate and sort results
+            const annotated = data.results.map(function(r) {
+                const type = classifyTorrent(r.title);
+                const ver = parseVersionFromTitle(r.title);
+                let badge = '';
+                let sortOrder = 2; // default middle
+                let dimRow = false;
+
+                if (type === 'Update' && ownedVer && ver) {
+                    const cmp = compareVersions(ver, ownedVer);
+                    if (cmp > 0) {
+                        badge = '<span class="badge bg-success ms-1">Newer</span>';
+                        sortOrder = 0;
+                    } else {
+                        badge = '<span class="badge bg-secondary ms-1">Already have</span>';
+                        sortOrder = 3;
+                        dimRow = true;
+                    }
+                } else if (type === 'Update') {
+                    badge = '<span class="badge bg-info ms-1">Update</span>';
+                    sortOrder = 1;
+                } else if (type === 'DLC') {
+                    badge = '<span class="badge bg-info ms-1">DLC</span>';
+                    sortOrder = 4;
+                } else {
+                    badge = '<span class="badge bg-secondary ms-1">Base</span>';
+                    sortOrder = 2;
+                }
+                return { r, type, ver, badge, sortOrder, dimRow };
+            });
+
+            annotated.sort(function(a, b) {
+                if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+                return b.r.seeders - a.r.seeders;
+            });
+
+            let html = '<table class="table table-sm table-hover mb-0"><thead><tr><th>Title</th><th>Size</th><th>Seeders</th><th>Indexer</th><th></th></tr></thead><tbody>';
+            annotated.forEach(function(item) {
+                const t = $('<span>').text(item.r.title).html();
+                const rowStyle = item.dimRow ? ' style="opacity:0.5;"' : '';
+                html += `<tr${rowStyle}>` +
+                    `<td class="text-truncate" style="max-width:400px;" title="${t}">${t}${item.badge}</td>` +
+                    `<td>${formatSize(item.r.size)}</td>` +
+                    `<td><span class="badge ${item.r.seeders > 0 ? 'bg-success' : 'bg-secondary'}">${item.r.seeders}</span></td>` +
+                    `<td><small class="text-muted">${$('<span>').text(item.r.indexer).html()}</small></td>` +
+                    `<td><button class="btn btn-sm btn-outline-success" onclick="addDl('${encodeURIComponent(item.r.downloadUrl)}')"><i class="bi bi-download"></i></button></td>` +
+                    `</tr>`;
+            });
+            html += '</tbody></table>';
+            $('#dlSearchResults').html(html);
+        }).fail(function() {
+            $('#dlSearchResults').html('<p class="text-danger mb-0">Search failed.</p>');
+        });
+    }
+
+    $('#dlSearchQuery').on('keypress', function(e) { if (e.which === 13) runSearch(); });
+
+    function addDl(encodedUrl) {
+        $.ajax({
+            url: '/api/downloads/add',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ download_url: decodeURIComponent(encodedUrl), title_id: titleId }),
+            success: function() { alert('Download added! Check the Downloads page.'); },
+            error: function(xhr) { alert(xhr.responseJSON ? xhr.responseJSON.message : 'Failed'); }
+        });
+    }
+</script>
+{% endblock %}
