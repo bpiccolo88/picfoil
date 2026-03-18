@@ -210,8 +210,7 @@
             } else {
                 const ownedUpdates = (g.updates || []).filter(u => u.owned).length;
                 const totalUpdates = (g.updates || []).length;
-                const dvSuffix = g.owned_display_version ? ' (v' + g.owned_display_version + ')' : '';
-                updateStatus = '<span class="badge bg-warning">' + g.update_summary + dvSuffix + ' / ' + g.latest_update + '</span>';
+                updateStatus = '<span class="badge bg-warning">' + g.update_summary + ' / ' + g.latest_update + '</span>';
             }
 
             // DLC status

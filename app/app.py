@@ -480,6 +480,10 @@ def get_all_titles_api():
 @access_required('shop')
 def get_grouped_titles_api():
     games = generate_grouped_library()
+    # Strip internal filepath from update entries before sending to client
+    for g in games:
+        for u in g.get('updates', []):
+            u.pop('filepath', None)
     return jsonify({
         'total': len(games),
         'games': games
@@ -521,6 +525,18 @@ def get_title_detail_api(title_id):
                         })
 
     game['files'] = files_info
+
+    # Resolve display versions for this title's updates (lazy, cached)
+    for u in game.get('updates', []):
+        filepath = u.pop('filepath', None)
+        if filepath and u.get('owned'):
+            u['display_version'] = get_display_version_cached(filepath)
+        else:
+            u['display_version'] = None
+
+    # Set owned_display_version for the highest owned update
+    owned_updates = [u for u in game.get('updates', []) if u.get('owned') and u.get('display_version')]
+    game['owned_display_version'] = owned_updates[-1]['display_version'] if owned_updates else None
 
     # Add required firmware version
     titles_lib.load_titledb()

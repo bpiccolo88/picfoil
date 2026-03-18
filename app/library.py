@@ -9,7 +9,44 @@ import sys
 from pathlib import Path
 from utils import *
 from settings import load_settings
-from db import update_file_path 
+from db import update_file_path
+
+# Persistent cache for display versions (filepath -> version string)
+DISPLAY_VERSION_CACHE_FILE = os.path.join(CACHE_DIR, 'display_versions.json')
+
+def _load_display_version_cache():
+    try:
+        with open(DISPLAY_VERSION_CACHE_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def _save_display_version_cache(cache):
+    cache_path = Path(DISPLAY_VERSION_CACHE_FILE)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_write_json(cache_path, cache)
+
+_dv_cache = None
+
+def _get_dv_cache():
+    global _dv_cache
+    if _dv_cache is None:
+        _dv_cache = _load_display_version_cache()
+    return _dv_cache
+
+def _flush_dv_cache():
+    global _dv_cache
+    if _dv_cache is not None:
+        _save_display_version_cache(_dv_cache)
+
+def get_display_version_cached(filepath):
+    """Get display version from in-memory cache, extracting if needed."""
+    cache = _get_dv_cache()
+    if filepath in cache:
+        return cache[filepath]
+    dv = titles_lib.extract_display_version(filepath)
+    cache[filepath] = dv
+    return dv
 
 def sanitize_filename(name, windows_compatible=False):
     if sys.platform == 'win32' or windows_compatible:
@@ -899,17 +936,14 @@ def generate_grouped_library():
         for ua in owned_update_apps:
             all_known_versions.add(int(ua['app_version']))
 
-        # Extract display versions from owned update files
-        display_versions = {}
+        # Collect file paths for owned updates (display versions resolved lazily)
+        owned_filepaths = {}
         for ua in owned_update_apps:
             if ua.get('owned'):
                 v = int(ua['app_version'])
                 app_obj = get_app_by_id_and_version(ua['app_id'], ua['app_version'])
                 if app_obj and app_obj.files:
-                    filepath = app_obj.files[0].filepath
-                    dv = titles_lib.extract_display_version(filepath)
-                    if dv:
-                        display_versions[v] = dv
+                    owned_filepaths[v] = app_obj.files[0].filepath
 
         for v in sorted(all_known_versions):
             if v == 0:
@@ -919,7 +953,7 @@ def generate_grouped_library():
                 'update_number': titles_lib.get_update_number(v),
                 'release_date': version_release_dates.get(v, 'Unknown'),
                 'owned': v in owned_versions_set,
-                'display_version': display_versions.get(v),
+                'filepath': owned_filepaths.get(v),
             })
 
         entry['updates'] = update_list
@@ -930,18 +964,13 @@ def generate_grouped_library():
             latest_update_num = update_list[-1]['update_number']
             entry['latest_update'] = f"Update {latest_update_num}"
             if owned_updates:
-                highest_owned_update = max(owned_updates, key=lambda u: u['update_number'])
-                highest_owned = highest_owned_update['update_number']
-                owned_dv = highest_owned_update.get('display_version')
+                highest_owned = max(u['update_number'] for u in owned_updates)
                 entry['update_summary'] = f"Update {highest_owned}"
-                entry['owned_display_version'] = owned_dv
             else:
                 entry['update_summary'] = 'None'
-                entry['owned_display_version'] = None
         else:
             entry['update_summary'] = 'None'
             entry['latest_update'] = 'None'
-            entry['owned_display_version'] = None
 
         # DLCs
         dlc_apps = entry['_dlc_apps']
