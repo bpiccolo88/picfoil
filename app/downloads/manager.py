@@ -392,13 +392,18 @@ def verify_and_copy_download(torrent_info, tracked_state, settings):
                 }
 
             if not success or not contents:
-                return "failed", {
-                    "failed_reason": f"could not identify file: {error or 'unknown error'}",
-                    "source_files": source_filenames,
-                }
-
-            # 3. Verify title_id match (if we have a requested title_id)
-            if requested_title_id:
+                if requested_title_id:
+                    # Identification failed but we know what game this is for —
+                    # accept the file based on the tracked title_id and extension check
+                    logger.warning(f"Could not identify {os.path.basename(filepath)} via CNMT or filename "
+                                   f"({error or 'unknown error'}), accepting based on tracked title_id {requested_title_id}")
+                else:
+                    return "failed", {
+                        "failed_reason": f"could not identify file: {error or 'unknown error'}",
+                        "source_files": source_filenames,
+                    }
+            elif requested_title_id:
+                # 3. Verify title_id match
                 file_title_id = contents[0].get("title_id") or ""
                 # Compare first 13 chars (base title ID portion)
                 if not file_title_id or file_title_id[:13].upper() != requested_title_id[:13].upper():

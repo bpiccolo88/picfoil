@@ -529,10 +529,12 @@ def get_title_detail_api(title_id):
     # Resolve display versions for this title's updates (lazy, cached)
     for u in game.get('updates', []):
         filepath = u.pop('filepath', None)
-        if filepath and u.get('owned'):
+        if u.get('display_version'):
+            pass  # already resolved (e.g. from old cache format)
+        elif filepath and u.get('owned'):
             u['display_version'] = get_display_version_cached(filepath)
         else:
-            u['display_version'] = None
+            u.setdefault('display_version', None)
 
     # Set owned_display_version for the highest owned update
     owned_updates = [u for u in game.get('updates', []) if u.get('owned') and u.get('display_version')]
